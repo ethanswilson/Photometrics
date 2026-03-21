@@ -188,32 +188,51 @@ vec2 worldToUV(vec2 world) {
   return ndc + 0.5;
 }
 
-// Simple GI approximation: sample nearby illuminated wall surfaces
-// and add their reflected contribution
+// Segment intersection for bounce occlusion
+float segIntersectB(vec2 ro, vec2 rd, vec2 a, vec2 b) {
+  vec2 ab = b - a;
+  vec2 ao = ro - a;
+  float denom = rd.x * ab.y - rd.y * ab.x;
+  if (abs(denom) < 1e-8) return -1.0;
+  float t = (ao.x * ab.y - ao.y * ab.x) / denom;
+  float s = (ao.x * rd.y - ao.y * rd.x) / denom;
+  if (t > 0.01 && s >= 0.0 && s <= 1.0) return t;
+  return -1.0;
+}
+
+// Check if path from A to B is blocked by any wall
+bool isOccluded(vec2 from, vec2 to) {
+  vec2 dir = to - from;
+  float dist = length(dir);
+  if (dist < 0.01) return false;
+  vec2 rd = dir / dist;
+  for (int w = 0; w < 64; w++) {
+    if (w >= u_wallCount) break;
+    float t = segIntersectB(from, rd, u_walls[w].xy, u_walls[w].zw);
+    if (t > 0.0 && t < dist - 0.05) return true;
+  }
+  return false;
+}
+
 void main() {
   vec3 existing = texture(u_prevPass, v_uv).rgb;
 
-  // Sample reflected light from wall surfaces
   vec3 bounce = vec3(0.0);
   vec2 worldPos = uvToWorld(v_uv);
 
-  // For each wall, compute its contribution as a diffuse reflector
   for (int w = 0; w < 64; w++) {
     if (w >= u_wallCount) break;
 
     vec2 a = u_walls[w].xy;
     vec2 b = u_walls[w].zw;
 
-    // Wall geometry
     vec2 wallSegDir = normalize(b - a);
     vec2 wallNormal = vec2(-wallSegDir.y, wallSegDir.x);
     float wallLen = length(b - a);
 
-    // Determine which side of the wall our pixel is on
-    vec2 toPixel = worldPos - a;
-    float pixelSide = sign(dot(toPixel, wallNormal));
+    // Which side of the wall is our pixel on
+    float pixelSide = sign(dot(worldPos - a, wallNormal));
 
-    // Sample points along the wall
     for (int s = 0; s < 8; s++) {
       float t = (float(s) + 0.5) / 8.0;
       vec2 wallPt = mix(a, b, t);
@@ -221,22 +240,20 @@ void main() {
 
       if (wallUV.x < 0.0 || wallUV.x > 1.0 || wallUV.y < 0.0 || wallUV.y > 1.0) continue;
 
-      // Light arriving at wall point (linear lux)
       vec3 wallLight = texture(u_prevPass, wallUV).rgb;
 
-      // Direction from wall point to our pixel
       vec2 toUs = worldPos - wallPt;
       float dist = length(toUs);
       if (dist < 0.05) continue;
       vec2 toUsDir = toUs / dist;
 
-      // Cosine of angle between outgoing direction and wall normal
-      // Use the normal facing toward our pixel
       vec2 faceNormal = wallNormal * pixelSide;
       float cosOut = dot(toUsDir, faceNormal);
-      if (cosOut <= 0.0) continue; // behind the wall face
+      if (cosOut <= 0.0) continue;
 
-      // Lambertian: reflected = incident * reflectance * cos(theta) / (pi * r^2)
+      // Check if path from wall point to pixel is blocked by any wall
+      if (isOccluded(wallPt, worldPos)) continue;
+
       float segLen = wallLen / 8.0;
       float atten = cosOut * segLen / (3.14159 * (dist * dist + 0.01));
 

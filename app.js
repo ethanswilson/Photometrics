@@ -38,8 +38,8 @@ const state = {
   showGrid: true,
   showLux: true,
   bounceEnabled: true,
-  bouncePasses: 1,
-  wallReflectance: 0.3,
+  bouncePasses: 2,
+  wallReflectance: 0.7,
   walls: [[-3, 2, -1, 3], [1, 3, 3, 2]],  // two starter walls
   wallEditMode: false,
   wallDrawStart: null,
