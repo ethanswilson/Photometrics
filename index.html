@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Photometrics — Beam Ray Tracer</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a;
+      color: #e0e0e0;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    #header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 16px;
+      background: #111;
+      border-bottom: 1px solid #222;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    #header h1 {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: #ccc;
+    }
+    #header .info {
+      font-size: 11px;
+      color: #666;
+    }
+    #main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    #sidebar {
+      width: 280px;
+      background: #111;
+      border-right: 1px solid #222;
+      overflow-y: auto;
+      flex-shrink: 0;
+      padding: 12px;
+      font-size: 12px;
+    }
+    #sidebar h2 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #666;
+      margin: 12px 0 6px 0;
+    }
+    #sidebar h2:first-child { margin-top: 0; }
+    #sidebar label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 4px 0;
+      color: #aaa;
+    }
+    #sidebar input[type="range"] {
+      width: 120px;
+      accent-color: #f90;
+    }
+    #sidebar select {
+      width: 130px;
+      background: #1a1a1a;
+      color: #ddd;
+      border: 1px solid #333;
+      padding: 2px 4px;
+      font-size: 11px;
+      font-family: inherit;
+    }
+    #sidebar .value {
+      color: #f90;
+      min-width: 40px;
+      text-align: right;
+      font-size: 11px;
+    }
+    #sidebar .section {
+      border-bottom: 1px solid #1a1a1a;
+      padding-bottom: 8px;
+      margin-bottom: 4px;
+    }
+    #sidebar button {
+      background: #1a1a1a;
+      color: #ddd;
+      border: 1px solid #333;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      margin: 2px;
+    }
+    #sidebar button:hover { background: #252525; }
+    #sidebar button.active { border-color: #f90; color: #f90; }
+    #canvas-wrap {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #overlay {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      font-size: 11px;
+      color: #555;
+      pointer-events: none;
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 4px 0;
+      color: #aaa;
+    }
+    .checkbox-row input[type="checkbox"] {
+      accent-color: #f90;
+    }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>PHOTOMETRICS — BEAM RAY TRACER</h1>
+    <span class="info" id="fps-display">-- fps</span>
+  </div>
+  <div id="main">
+    <div id="sidebar">
+      <h2>Light Fixture</h2>
+      <div class="section">
+        <label>Type <select id="light-type"></select></label>
+      </div>
+
+      <h2>Beam Control</h2>
+      <div class="section">
+        <label>Intensity <span class="value" id="intensity-val">100%</span></label>
+        <input type="range" id="intensity" min="0" max="200" value="100">
+        <label>Beam Angle <span class="value" id="beam-angle-val">--</span></label>
+        <input type="range" id="beam-angle" min="5" max="120" value="30">
+        <label>Zoom <span class="value" id="zoom-val">50%</span></label>
+        <input type="range" id="zoom" min="0" max="100" value="50">
+        <label>Direction <span class="value" id="direction-val">0°</span></label>
+        <input type="range" id="direction" min="0" max="360" value="180" step="1">
+      </div>
+
+      <h2>Diffusion</h2>
+      <div class="section">
+        <label>Type <select id="diffusion-type">
+          <option value="none">None</option>
+          <option value="light">Light Frost (1/4)</option>
+          <option value="medium">Medium Frost (1/2)</option>
+          <option value="heavy">Heavy Frost (Full)</option>
+          <option value="silk">Silk / Grid Cloth</option>
+          <option value="opal">Opal</option>
+        </select></label>
+        <label>Softness <span class="value" id="diffusion-val">0%</span></label>
+        <input type="range" id="diffusion" min="0" max="100" value="0">
+      </div>
+
+      <h2>Source Quality</h2>
+      <div class="section">
+        <label>Source Size <span class="value" id="source-size-val">50%</span></label>
+        <input type="range" id="source-size" min="1" max="100" value="15">
+        <label>Edge Quality <span class="value" id="edge-quality-val">--</span></label>
+      </div>
+
+      <h2>Environment</h2>
+      <div class="section">
+        <label>Grid Scale <span class="value" id="grid-scale-val">1m</span></label>
+        <input type="range" id="grid-scale" min="1" max="20" value="5">
+        <div class="checkbox-row">
+          <input type="checkbox" id="show-grid" checked>
+          <span>Show Grid</span>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="show-lux" checked>
+          <span>Show Lux Contours</span>
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" id="bounce-enabled">
+          <span>Enable Bounce Light</span>
+        </div>
+        <label>Bounce Passes <span class="value" id="bounce-val">1</span></label>
+        <input type="range" id="bounce-passes" min="1" max="4" value="1">
+        <label>Wall Reflectance <span class="value" id="reflectance-val">30%</span></label>
+        <input type="range" id="wall-reflectance" min="0" max="100" value="30">
+      </div>
+
+      <h2>Walls</h2>
+      <div class="section">
+        <button id="add-wall">+ Add Wall</button>
+        <button id="clear-walls">Clear All</button>
+        <div class="checkbox-row">
+          <input type="checkbox" id="wall-edit-mode">
+          <span>Edit Mode (click canvas)</span>
+        </div>
+      </div>
+
+      <h2>Color</h2>
+      <div class="section">
+        <label>Color Temp <span class="value" id="cct-val">5600K</span></label>
+        <input type="range" id="color-temp" min="2000" max="10000" value="5600" step="100">
+      </div>
+    </div>
+    <div id="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <div id="overlay">Click + drag to move light · Scroll to zoom view · Right-click drag to pan</div>
+    </div>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
