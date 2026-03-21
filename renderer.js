@@ -588,16 +588,30 @@ export class Renderer {
       return [sx, sy];
     };
 
-    // Draw walls
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 3;
+    // Draw walls with grabbable endpoints
     for (const wall of walls) {
       const [x1, y1] = worldToScreen(wall[0], wall[1]);
       const [x2, y2] = worldToScreen(wall[2], wall[3]);
+      // Wall line
+      ctx.strokeStyle = '#ddd';
+      ctx.lineWidth = 4;
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
+      // Endpoints
+      ctx.fillStyle = '#fff';
+      for (const [px, py] of [[x1, y1], [x2, y2]]) {
+        ctx.beginPath();
+        ctx.arc(px, py, 7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Midpoint (drag handle)
+      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.beginPath();
+      ctx.arc(mx, my, 5, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // Draw light fixture icon

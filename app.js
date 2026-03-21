@@ -37,12 +37,13 @@ const state = {
   gridScale: 1.0,
   showGrid: true,
   showLux: true,
-  bounceEnabled: false,
+  bounceEnabled: true,
   bouncePasses: 1,
   wallReflectance: 0.3,
-  walls: [],             // [[x1,y1,x2,y2], ...]
+  walls: [[-3, 2, -1, 3], [1, 3, 3, 2]],  // two starter walls
   wallEditMode: false,
   wallDrawStart: null,
+  draggingWall: null,    // { wallIdx, endIdx } for endpoint dragging
 };
 
 // ============================================================
@@ -176,8 +177,48 @@ document.getElementById('add-wall').addEventListener('click', () => {
 // ============================================================
 
 let isDraggingLight = false;
+let isDraggingWall = null; // { wallIdx, endIdx (0=start,1=end), wholeWall, offsetA, offsetB }
 let isPanning = false;
 let lastMouse = [0, 0];
+
+// Find nearest wall endpoint or wall midpoint within threshold
+function findNearWall(wx, wy, threshold) {
+  for (let i = 0; i < state.walls.length; i++) {
+    const w = state.walls[i];
+    // Check endpoints
+    for (let e = 0; e < 2; e++) {
+      const px = w[e * 2], py = w[e * 2 + 1];
+      const d = Math.sqrt((wx - px) ** 2 + (wy - py) ** 2);
+      if (d < threshold) return { wallIdx: i, endIdx: e };
+    }
+    // Check midpoint (drag whole wall)
+    const mx = (w[0] + w[2]) / 2, my = (w[1] + w[3]) / 2;
+    const dm = Math.sqrt((wx - mx) ** 2 + (wy - my) ** 2);
+    if (dm < threshold) {
+      return {
+        wallIdx: i, endIdx: -1, wholeWall: true,
+        offsetA: [w[0] - wx, w[1] - wy],
+        offsetB: [w[2] - wx, w[3] - wy]
+      };
+    }
+  }
+  return null;
+}
+
+function applyWallDrag(wx, wy) {
+  if (!isDraggingWall) return;
+  const w = state.walls[isDraggingWall.wallIdx];
+  if (isDraggingWall.wholeWall) {
+    w[0] = wx + isDraggingWall.offsetA[0];
+    w[1] = wy + isDraggingWall.offsetA[1];
+    w[2] = wx + isDraggingWall.offsetB[0];
+    w[3] = wy + isDraggingWall.offsetB[1];
+  } else {
+    const ei = isDraggingWall.endIdx;
+    w[ei * 2] = wx;
+    w[ei * 2 + 1] = wy;
+  }
+}
 
 function screenToWorld(sx, sy) {
   const dpr = window.devicePixelRatio || 1;
@@ -200,14 +241,19 @@ canvas.parentElement.addEventListener('mousedown', (e) => {
   }
 
   if (e.button === 2 || (e.button === 0 && e.shiftKey)) {
-    // Pan
     isPanning = true;
     lastMouse = [e.clientX, e.clientY];
     e.preventDefault();
     return;
   }
 
-  // Check if clicking near light
+  // Check walls first, then light
+  const wallHit = findNearWall(wx, wy, 0.5);
+  if (wallHit) {
+    isDraggingWall = wallHit;
+    return;
+  }
+
   const dx = wx - state.lightPos[0];
   const dy = wy - state.lightPos[1];
   if (Math.sqrt(dx * dx + dy * dy) < 0.5) {
@@ -218,7 +264,9 @@ canvas.parentElement.addEventListener('mousedown', (e) => {
 canvas.parentElement.addEventListener('mousemove', (e) => {
   const [wx, wy] = screenToWorld(e.clientX, e.clientY);
 
-  if (isDraggingLight) {
+  if (isDraggingWall) {
+    applyWallDrag(wx, wy);
+  } else if (isDraggingLight) {
     state.lightPos = [wx, wy];
   }
 
@@ -244,6 +292,7 @@ canvas.parentElement.addEventListener('mouseup', (e) => {
   }
 
   isDraggingLight = false;
+  isDraggingWall = null;
   isPanning = false;
 });
 
@@ -261,6 +310,7 @@ canvas.parentElement.addEventListener('wheel', (e) => {
 // ============================================================
 
 let touchDraggingLight = false;
+let touchDraggingWall = null;
 let touchPanning = false;
 let lastTouchCenter = null;
 let lastPinchDist = null;
@@ -288,7 +338,15 @@ canvas.parentElement.addEventListener('touchstart', (e) => {
       return;
     }
 
-    // Check if near light
+    // Check walls first, then light
+    const wallHit = findNearWall(wx, wy, 0.8);
+    if (wallHit) {
+      touchDraggingWall = wallHit;
+      isDraggingWall = wallHit;
+      e.preventDefault();
+      return;
+    }
+
     const dx = wx - state.lightPos[0];
     const dy = wy - state.lightPos[1];
     if (Math.sqrt(dx * dx + dy * dy) < 0.8) {
@@ -306,11 +364,16 @@ canvas.parentElement.addEventListener('touchstart', (e) => {
 }, { passive: false });
 
 canvas.parentElement.addEventListener('touchmove', (e) => {
-  if (touchDraggingLight && e.touches.length === 1) {
+  if (e.touches.length === 1) {
     const touch = e.touches[0];
     const [wx, wy] = screenToWorld(touch.clientX, touch.clientY);
-    state.lightPos = [wx, wy];
-    e.preventDefault();
+    if (touchDraggingWall) {
+      applyWallDrag(wx, wy);
+      e.preventDefault();
+    } else if (touchDraggingLight) {
+      state.lightPos = [wx, wy];
+      e.preventDefault();
+    }
   }
 
   if (touchPanning && e.touches.length === 2) {
@@ -352,6 +415,8 @@ canvas.parentElement.addEventListener('touchend', (e) => {
   }
 
   touchDraggingLight = false;
+  touchDraggingWall = null;
+  isDraggingWall = null;
   if (e.touches.length < 2) {
     touchPanning = false;
     lastTouchCenter = null;

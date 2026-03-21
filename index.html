@@ -122,36 +122,38 @@
 
     /* Mobile styles */
     @media (max-width: 768px) {
-      #header h1 { font-size: 12px; }
+      #header { display: none; }
       #main { flex-direction: column; }
       #sidebar {
         position: fixed;
         top: 0;
         left: 0;
+        right: 0;
         width: 100%;
-        height: 60vh;
-        bottom: auto;
+        max-height: 35vh;
         z-index: 50;
         transform: translateY(-100%);
         transition: transform 0.25s ease;
         border-right: none;
-        border-bottom: 1px solid #333;
-        padding-bottom: 60px;
+        border-bottom: 2px solid #333;
+        padding: 8px 12px 12px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
       }
       #sidebar.open {
         transform: translateY(0);
       }
       #sidebar-toggle { display: block; }
-      #sidebar label { font-size: 14px; }
-      #sidebar input[type="range"] { width: 50%; height: 30px; }
-      #sidebar select { font-size: 14px; padding: 6px 8px; width: 55%; }
-      #sidebar button { padding: 10px 16px; font-size: 14px; }
-      #sidebar .checkbox-row { font-size: 14px; padding: 4px 0; }
-      #sidebar .checkbox-row input[type="checkbox"] { width: 20px; height: 20px; }
-      #sidebar h2 { font-size: 12px; margin: 14px 0 8px 0; }
-      #sidebar .value { font-size: 13px; }
+      #sidebar h2 { font-size: 10px; margin: 8px 0 3px 0; }
+      #sidebar label { font-size: 12px; margin: 2px 0; }
+      #sidebar input[type="range"] { width: 55%; height: 24px; }
+      #sidebar select { font-size: 12px; padding: 4px 6px; width: 50%; }
+      #sidebar button { padding: 6px 12px; font-size: 12px; }
+      #sidebar .checkbox-row { font-size: 12px; padding: 2px 0; }
+      #sidebar .checkbox-row input[type="checkbox"] { width: 18px; height: 18px; }
+      #sidebar .value { font-size: 11px; }
+      #sidebar .section { padding-bottom: 4px; margin-bottom: 2px; }
       #overlay { font-size: 10px; }
-      #header { padding: 6px 12px; }
     }
 
     #canvas-wrap {
@@ -287,7 +289,7 @@
           <span>Show Lux Contours</span>
         </div>
         <div class="checkbox-row">
-          <input type="checkbox" id="bounce-enabled">
+          <input type="checkbox" id="bounce-enabled" checked>
           <span>Enable Bounce Light</span>
         </div>
         <label>Bounce Passes <span class="value" id="bounce-val">1</span></label>
