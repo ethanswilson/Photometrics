@@ -208,6 +208,109 @@ canvas.parentElement.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 // ============================================================
+//  TOUCH INTERACTION
+// ============================================================
+
+let touchDraggingLight = false;
+let touchPanning = false;
+let lastTouchCenter = null;
+let lastPinchDist = null;
+
+function getTouchCenter(touches) {
+  const x = (touches[0].clientX + touches[1].clientX) / 2;
+  const y = (touches[0].clientY + touches[1].clientY) / 2;
+  return [x, y];
+}
+
+function getPinchDist(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+canvas.parentElement.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) {
+    const touch = e.touches[0];
+    const [wx, wy] = screenToWorld(touch.clientX, touch.clientY);
+
+    if (state.wallEditMode) {
+      state.wallDrawStart = [wx, wy];
+      e.preventDefault();
+      return;
+    }
+
+    // Check if near light
+    const dx = wx - state.lightPos[0];
+    const dy = wy - state.lightPos[1];
+    if (Math.sqrt(dx * dx + dy * dy) < 0.8) {
+      touchDraggingLight = true;
+      e.preventDefault();
+    }
+  } else if (e.touches.length === 2) {
+    // Start pinch / pan
+    touchDraggingLight = false;
+    touchPanning = true;
+    lastTouchCenter = getTouchCenter(e.touches);
+    lastPinchDist = getPinchDist(e.touches);
+    e.preventDefault();
+  }
+}, { passive: false });
+
+canvas.parentElement.addEventListener('touchmove', (e) => {
+  if (touchDraggingLight && e.touches.length === 1) {
+    const touch = e.touches[0];
+    const [wx, wy] = screenToWorld(touch.clientX, touch.clientY);
+    state.lightPos = [wx, wy];
+    e.preventDefault();
+  }
+
+  if (touchPanning && e.touches.length === 2) {
+    const center = getTouchCenter(e.touches);
+    const dist = getPinchDist(e.touches);
+
+    // Pan
+    if (lastTouchCenter) {
+      const dpr = window.devicePixelRatio || 1;
+      const dx = (center[0] - lastTouchCenter[0]) * dpr / renderer.viewScale;
+      const dy = (center[1] - lastTouchCenter[1]) * dpr / renderer.viewScale;
+      renderer.viewOffset[0] -= dx;
+      renderer.viewOffset[1] -= dy;
+    }
+
+    // Pinch zoom
+    if (lastPinchDist && lastPinchDist > 0) {
+      const scale = dist / lastPinchDist;
+      renderer.viewScale *= scale;
+      renderer.viewScale = Math.max(10, Math.min(500, renderer.viewScale));
+    }
+
+    lastTouchCenter = center;
+    lastPinchDist = dist;
+    e.preventDefault();
+  }
+}, { passive: false });
+
+canvas.parentElement.addEventListener('touchend', (e) => {
+  if (state.wallEditMode && state.wallDrawStart && e.changedTouches.length === 1) {
+    const touch = e.changedTouches[0];
+    const [wx, wy] = screenToWorld(touch.clientX, touch.clientY);
+    const [sx, sy] = state.wallDrawStart;
+    const dist = Math.sqrt((wx - sx) ** 2 + (wy - sy) ** 2);
+    if (dist > 0.1) {
+      state.walls.push([sx, sy, wx, wy]);
+    }
+    state.wallDrawStart = null;
+  }
+
+  touchDraggingLight = false;
+  if (e.touches.length < 2) {
+    touchPanning = false;
+    lastTouchCenter = null;
+    lastPinchDist = null;
+  }
+});
+
+// ============================================================
 //  RENDER LOOP
 // ============================================================
 

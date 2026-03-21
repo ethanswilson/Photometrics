@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Photometrics — Beam Ray Tracer</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -100,15 +100,71 @@
     }
     #sidebar button:hover { background: #252525; }
     #sidebar button.active { border-color: #f90; color: #f90; }
+
+    /* Mobile toggle button */
+    #sidebar-toggle {
+      display: none;
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      z-index: 100;
+      background: #1a1a1a;
+      color: #f90;
+      border: 1px solid #333;
+      width: 44px;
+      height: 44px;
+      font-size: 22px;
+      font-family: inherit;
+      cursor: pointer;
+      border-radius: 6px;
+      line-height: 1;
+    }
+
+    /* Mobile styles */
+    @media (max-width: 768px) {
+      #header h1 { font-size: 12px; }
+      #main { flex-direction: column; }
+      #sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 60vh;
+        bottom: auto;
+        z-index: 50;
+        transform: translateY(-100%);
+        transition: transform 0.25s ease;
+        border-right: none;
+        border-bottom: 1px solid #333;
+        padding-bottom: 60px;
+      }
+      #sidebar.open {
+        transform: translateY(0);
+      }
+      #sidebar-toggle { display: block; }
+      #sidebar label { font-size: 14px; }
+      #sidebar input[type="range"] { width: 50%; height: 30px; }
+      #sidebar select { font-size: 14px; padding: 6px 8px; width: 55%; }
+      #sidebar button { padding: 10px 16px; font-size: 14px; }
+      #sidebar .checkbox-row { font-size: 14px; padding: 4px 0; }
+      #sidebar .checkbox-row input[type="checkbox"] { width: 20px; height: 20px; }
+      #sidebar h2 { font-size: 12px; margin: 14px 0 8px 0; }
+      #sidebar .value { font-size: 13px; }
+      #overlay { font-size: 10px; }
+      #header { padding: 6px 12px; }
+    }
+
     #canvas-wrap {
       flex: 1;
       position: relative;
       overflow: hidden;
+      touch-action: none;
     }
     canvas {
       display: block;
       width: 100%;
       height: 100%;
+      touch-action: none;
     }
     #overlay {
       position: absolute;
@@ -172,6 +228,7 @@
   </div>
 
   <div id="app-root">
+  <button id="sidebar-toggle">&#9776;</button>
   <div id="header">
     <h1>PHOTOMETRICS — BEAM RAY TRACER</h1>
     <span class="info" id="fps-display">-- fps</span>
@@ -256,7 +313,7 @@
     </div>
     <div id="canvas-wrap">
       <canvas id="canvas"></canvas>
-      <div id="overlay">Click + drag to move light · Scroll to zoom view · Right-click drag to pan</div>
+      <div id="overlay">Drag to move light · Pinch to zoom · Two-finger drag to pan</div>
     </div>
   </div>
   </div><!-- /app-root -->
@@ -311,6 +368,14 @@
       s.type = 'module';
       s.src = 'app.js';
       document.body.appendChild(s);
+
+      // Sidebar toggle for mobile
+      const toggle = document.getElementById('sidebar-toggle');
+      const sidebar = document.getElementById('sidebar');
+      toggle.addEventListener('click', () => {
+        sidebar.classList.toggle('open');
+        toggle.textContent = sidebar.classList.contains('open') ? '\u2715' : '\u2630';
+      });
     }
   </script>
 </body>
