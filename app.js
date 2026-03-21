@@ -56,7 +56,7 @@ const overlayCtx = overlayCanvas.getContext('2d');
 let renderer;
 try {
   renderer = new Renderer(canvas);
-  showError(`WebGL2 OK | Float FBO: ${renderer.hasFloatFBO}`);
+  showError(`WebGL2 OK | Float FBO: ${renderer.hasFloatFBO} | Float Linear: ${renderer.hasFloatLinear}`);
 } catch (e) {
   showError(`FATAL: ${e.message}`);
   document.body.innerHTML = `<div style="padding:40px;color:#f66;font-size:16px;">

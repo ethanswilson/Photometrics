@@ -288,6 +288,7 @@ export class Renderer {
 
     const gl = this.gl;
     this.hasFloatFBO = !!gl.getExtension('EXT_color_buffer_float');
+    this.hasFloatLinear = !!gl.getExtension('OES_texture_float_linear');
 
     this.programs = {};
     this.fbos = {};
@@ -371,11 +372,14 @@ export class Renderer {
     const gl = this.gl;
     this.textures.dist = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.textures.dist);
-    // Placeholder — 256x1 R32F
+
+    // Use R32F if float linear filtering is available, otherwise R16F or R8
+    const filter = this.hasFloatLinear ? gl.LINEAR : gl.NEAREST;
+
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 256, 1, 0, gl.RED, gl.FLOAT,
       new Float32Array(256));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
