@@ -89,44 +89,21 @@ float segIntersect(vec2 ro, vec2 rd, vec2 a, vec2 b) {
   return -1.0;
 }
 
-// Shadow test with soft penumbra based on source size
+// Shadow test — hard shadow with small epsilon to avoid self-occlusion
 float shadowTest(vec2 origin, vec2 target) {
   vec2 dir = target - origin;
   float dist = length(dir);
   if (dist < 0.001) return 1.0;
   vec2 rd = dir / dist;
 
-  // For soft shadows, sample multiple rays offset perpendicular to the ray direction
-  // based on source size
-  vec2 perp = vec2(-rd.y, rd.x);
-  float penumbraRadius = u_sourceSize * 0.15; // world-space offset
-
-  int samples = (u_sourceSize > 0.05) ? 5 : 1;
-  float lit = 0.0;
-
-  for (int s = 0; s < 5; s++) {
-    if (s >= samples) break;
-    float offset = 0.0;
-    if (samples > 1) {
-      offset = (float(s) / float(samples - 1) - 0.5) * 2.0 * penumbraRadius;
+  for (int w = 0; w < 64; w++) {
+    if (w >= u_wallCount) break;
+    float t = segIntersect(origin, rd, u_walls[w].xy, u_walls[w].zw);
+    if (t > 0.01 && t < dist - 0.01) {
+      return 0.0;
     }
-    vec2 sampleOrigin = origin + perp * offset;
-    vec2 sampleDir = target - sampleOrigin;
-    float sampleDist2 = length(sampleDir);
-    vec2 sRd = sampleDir / sampleDist2;
-
-    bool blocked = false;
-    for (int w = 0; w < 64; w++) {
-      if (w >= u_wallCount) break;
-      float t = segIntersect(sampleOrigin, sRd, u_walls[w].xy, u_walls[w].zw);
-      if (t > 0.0 && t < sampleDist2 - 0.01) {
-        blocked = true;
-        break;
-      }
-    }
-    if (!blocked) lit += 1.0;
   }
-  return lit / float(samples);
+  return 1.0;
 }
 
 void main() {
@@ -244,7 +221,7 @@ void main() {
 
       vec2 toUs = worldPos - wallPt;
       float dist = length(toUs);
-      if (dist < 0.05) continue;
+      if (dist < 0.15) continue;
       vec2 toUsDir = toUs / dist;
 
       vec2 faceNormal = wallNormal * pixelSide;
@@ -255,7 +232,7 @@ void main() {
       if (isOccluded(wallPt, worldPos)) continue;
 
       float segLen = wallLen / 8.0;
-      float atten = cosOut * segLen / (3.14159 * (dist * dist + 0.01));
+      float atten = cosOut * segLen / (3.14159 * (dist * dist + 0.1));
 
       bounce += wallLight * atten * u_reflectance;
     }
