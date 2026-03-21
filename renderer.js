@@ -287,7 +287,7 @@ export class Renderer {
     if (!this.gl) throw new Error('WebGL2 not supported');
 
     const gl = this.gl;
-    gl.getExtension('EXT_color_buffer_float');
+    this.hasFloatFBO = !!gl.getExtension('EXT_color_buffer_float');
 
     this.programs = {};
     this.fbos = {};
@@ -391,7 +391,13 @@ export class Renderer {
     const fbo = gl.createFramebuffer();
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+
+    // Try RGBA16F first, fall back to RGBA8 for iOS compatibility
+    if (this.hasFloatFBO) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+    } else {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    }
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -399,6 +405,17 @@ export class Renderer {
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+
+    // Check FBO completeness — if RGBA16F failed, retry with RGBA8
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE && this.hasFloatFBO) {
+      console.warn('RGBA16F FBO incomplete, falling back to RGBA8');
+      this.hasFloatFBO = false;
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    }
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     return { fbo, tex, width, height };

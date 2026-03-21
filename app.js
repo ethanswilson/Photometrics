@@ -3,6 +3,22 @@ import { FIXTURES, DIFFUSION, getDistributionAtZoom, getPeakCandelaAtZoom,
 import { Renderer } from './renderer.js';
 
 // ============================================================
+//  ON-SCREEN ERROR LOG (for mobile debugging)
+// ============================================================
+
+const errorLog = document.createElement('div');
+errorLog.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:rgba(0,0,0,0.85);color:#f66;font-size:11px;padding:6px 10px;z-index:9999;max-height:30vh;overflow-y:auto;font-family:monospace;display:none;';
+document.body.appendChild(errorLog);
+
+function showError(msg) {
+  errorLog.style.display = 'block';
+  errorLog.textContent += msg + '\n';
+}
+
+window.addEventListener('error', (e) => showError(`ERR: ${e.message}`));
+window.addEventListener('unhandledrejection', (e) => showError(`REJECT: ${e.reason}`));
+
+// ============================================================
 //  STATE
 // ============================================================
 
@@ -40,7 +56,9 @@ const overlayCtx = overlayCanvas.getContext('2d');
 let renderer;
 try {
   renderer = new Renderer(canvas);
+  showError(`WebGL2 OK | Float FBO: ${renderer.hasFloatFBO}`);
 } catch (e) {
+  showError(`FATAL: ${e.message}`);
   document.body.innerHTML = `<div style="padding:40px;color:#f66;font-size:16px;">
     WebGL2 is required but not available in this browser.<br>${e.message}</div>`;
   throw e;

@@ -224,6 +224,7 @@
   <div id="auth-gate">
     <h1>PHOTOMETRICS</h1>
     <input type="password" id="auth-input" placeholder="password" autocomplete="off" autofocus>
+    <button id="auth-submit" style="background:#1a1a1a;color:#e0e0e0;border:1px solid #333;padding:10px 32px;font-size:14px;font-family:inherit;cursor:pointer;border-radius:4px;">Enter</button>
     <div class="error" id="auth-error"></div>
   </div>
 
@@ -345,8 +346,7 @@
       loadApp();
     }
 
-    input.addEventListener('keydown', async (e) => {
-      if (e.key !== 'Enter') return;
+    async function tryAuth() {
       error.textContent = '';
       const hash = await sha256(input.value);
       if (hash === realHash) {
@@ -358,7 +358,12 @@
         error.textContent = 'incorrect';
         input.value = '';
       }
+    }
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') tryAuth();
     });
+    document.getElementById('auth-submit').addEventListener('click', tryAuth);
 
     let appLoaded = false;
     function loadApp() {
