@@ -1,5 +1,6 @@
 import { FIXTURES, DIFFUSION, getDistributionAtZoom, getPeakCandelaAtZoom,
-         applyDiffusion, distributionToTextureData, cctToRGB } from './photometrics.js';
+         applyDiffusion, distributionToTextureData, cctToRGB,
+         sampleDistribution } from './photometrics.js';
 import { Renderer } from './renderer.js';
 
 // ============================================================
@@ -28,6 +29,7 @@ const state = {
   lightDir: Math.PI,     // radians — pointing down (south) in screen coords
   intensity: 1.0,
   zoom: 0.0,             // [0,1] spot to flood
+  beamAngleOverride: null,
   diffusionType: 'none',
   diffusionAmount: 0,
   sourceSize: 0.12,
@@ -100,12 +102,13 @@ bindSlider('intensity', 'intensity', v => v / 100, v => `${v}%`);
 bindSlider('zoom', 'zoom', v => v / 100, v => `${v}%`);
 bindSlider('direction', 'lightDir', v => v * Math.PI / 180, v => `${v}°`);
 
-// Beam angle slider drives zoom based on fixture's zoom range
+// Beam angle slider drives zoom and also stores override for angles beyond fixture range
 const beamAngleEl = document.getElementById('beam-angle');
 const beamAngleValEl = document.getElementById('beam-angle-val');
 beamAngleEl.addEventListener('input', () => {
   const angle = parseFloat(beamAngleEl.value);
   beamAngleValEl.textContent = `${angle}°`;
+  state.beamAngleOverride = angle;
   const fixture = FIXTURES[state.fixtureKey];
   if (fixture.zoomRange) {
     const [minA, maxA] = fixture.zoomRange;
@@ -385,6 +388,22 @@ function update() {
   // Compute distribution
   const fixture = FIXTURES[state.fixtureKey];
   let dist = getDistributionAtZoom(fixture, state.zoom);
+
+  // Scale distribution if beam angle override goes beyond fixture's native range
+  if (state.beamAngleOverride) {
+    const nativeAngle = fixture.zoomRange
+      ? fixture.zoomRange[0] + state.zoom * (fixture.zoomRange[1] - fixture.zoomRange[0])
+      : fixture.beamAngle;
+    const ratio = state.beamAngleOverride / Math.max(1, nativeAngle);
+    if (Math.abs(ratio - 1) > 0.05) {
+      // Stretch/compress the distribution angles
+      dist = dist.map(([angle, value]) => {
+        const scaledAngle = angle * ratio;
+        return [scaledAngle, value];
+      });
+    }
+  }
+
   if (state.diffusionType !== 'none' || state.diffusionAmount > 0) {
     dist = applyDiffusion(dist, state.diffusionType, state.diffusionAmount);
   }

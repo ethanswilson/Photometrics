@@ -71,8 +71,9 @@ float sampleDist(float angleRad) {
   float angleDeg = abs(angleRad) * 57.2957795;
   float u = clamp(angleDeg / 180.0, 0.0, 1.0);
   float raw = texture(u_distTex, vec2(u, 0.5)).r;
-  // Add soft spill past beam edge — real fixtures have housing reflections / lens spill
-  float spill = exp(-angleDeg * 0.06) * 0.015;
+  // Smooth spill: real lights don't hard-cut at the field angle.
+  // Gaussian-ish decay models housing reflections, lens flare, ambient spill.
+  float spill = exp(-angleDeg * angleDeg * 0.001) * 0.03;
   return raw + spill;
 }
 
@@ -170,14 +171,13 @@ void main() {
     color = max(color, gridColor * 0.4);
   }
 
-  // Lux contours
-  if (u_showLux) {
-    float luxVal = u_peakCandela * u_intensity * photIntensity * falloff * shadow;
-    // Draw contours at powers of 10 and 0.5x
-    float logLux = log(max(luxVal, 0.1)) / log(10.0);
+  // Lux contours — thin lines at whole powers of 10 only
+  if (u_showLux && lux > 1.0) {
+    float logLux = log(lux) / log(10.0);
     float frac1 = abs(fract(logLux) - 0.5) * 2.0;
-    float contour = 1.0 - smoothstep(0.0, 0.06, frac1);
-    color += vec3(0.7, 0.5, 0.2) * contour * 0.15 * smoothstep(0.0, 0.01, luxVal);
+    // Very thin, subtle contour lines
+    float contour = 1.0 - smoothstep(0.0, 0.03, frac1);
+    color += vec3(0.6, 0.4, 0.15) * contour * 0.08;
   }
 
   fragColor = vec4(color, 1.0);
