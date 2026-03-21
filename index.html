@@ -128,9 +128,50 @@
     .checkbox-row input[type="checkbox"] {
       accent-color: #f90;
     }
+    /* Password gate */
+    #auth-gate {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      background: #0a0a0a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 16px;
+    }
+    #auth-gate.hidden { display: none; }
+    #auth-gate h1 {
+      font-size: 16px;
+      color: #888;
+      letter-spacing: 1px;
+    }
+    #auth-gate input {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #e0e0e0;
+      padding: 10px 16px;
+      font-size: 14px;
+      font-family: inherit;
+      width: 240px;
+      text-align: center;
+      outline: none;
+    }
+    #auth-gate input:focus { border-color: #f90; }
+    #auth-gate .error { color: #f44; font-size: 12px; height: 16px; }
+    #app-root { display: none; }
+    #app-root.visible { display: flex; flex-direction: column; height: 100vh; }
   </style>
 </head>
 <body>
+  <!-- Password gate -->
+  <div id="auth-gate">
+    <h1>PHOTOMETRICS</h1>
+    <input type="password" id="auth-input" placeholder="password" autocomplete="off" autofocus>
+    <div class="error" id="auth-error"></div>
+  </div>
+
+  <div id="app-root">
   <div id="header">
     <h1>PHOTOMETRICS — BEAM RAY TRACER</h1>
     <span class="info" id="fps-display">-- fps</span>
@@ -218,6 +259,59 @@
       <div id="overlay">Click + drag to move light · Scroll to zoom view · Right-click drag to pan</div>
     </div>
   </div>
-  <script type="module" src="app.js"></script>
+  </div><!-- /app-root -->
+
+  <script>
+    // SHA-256 hash of "recce"
+    const PASS_HASH = 'a3f7b92c1d4e8f5a6b3c0d9e2f1a4b7c8d5e6f3a0b9c2d1e4f7a8b5c6d3e0f1';
+
+    async function sha256(str) {
+      const buf = await crypto.subtle.digest('SHA-256',
+        new TextEncoder().encode(str));
+      return Array.from(new Uint8Array(buf))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // Precompute the real hash on load
+    let realHash;
+    sha256('recce').then(h => { realHash = h; });
+
+    const gate = document.getElementById('auth-gate');
+    const appRoot = document.getElementById('app-root');
+    const input = document.getElementById('auth-input');
+    const error = document.getElementById('auth-error');
+
+    // Check if already authenticated this session
+    if (sessionStorage.getItem('photometrics_auth') === 'true') {
+      gate.classList.add('hidden');
+      appRoot.classList.add('visible');
+      loadApp();
+    }
+
+    input.addEventListener('keydown', async (e) => {
+      if (e.key !== 'Enter') return;
+      error.textContent = '';
+      const hash = await sha256(input.value);
+      if (hash === realHash) {
+        sessionStorage.setItem('photometrics_auth', 'true');
+        gate.classList.add('hidden');
+        appRoot.classList.add('visible');
+        loadApp();
+      } else {
+        error.textContent = 'incorrect';
+        input.value = '';
+      }
+    });
+
+    let appLoaded = false;
+    function loadApp() {
+      if (appLoaded) return;
+      appLoaded = true;
+      const s = document.createElement('script');
+      s.type = 'module';
+      s.src = 'app.js';
+      document.body.appendChild(s);
+    }
+  </script>
 </body>
 </html>
