@@ -83,7 +83,7 @@ float segIntersect(vec2 ro, vec2 rd, vec2 a, vec2 b) {
   vec2 ao = ro - a;
   float denom = rd.x * ab.y - rd.y * ab.x;
   if (abs(denom) < 1e-8) return -1.0;
-  float t = (ao.x * ab.y - ao.y * ab.x) / denom;
+  float t = (ao.y * ab.x - ao.x * ab.y) / denom;
   float s = (ao.x * rd.y - ao.y * rd.x) / denom;
   if (t > 0.001 && s >= 0.0 && s <= 1.0) return t;
   return -1.0;
@@ -194,7 +194,7 @@ float segIntersectB(vec2 ro, vec2 rd, vec2 a, vec2 b) {
   vec2 ao = ro - a;
   float denom = rd.x * ab.y - rd.y * ab.x;
   if (abs(denom) < 1e-8) return -1.0;
-  float t = (ao.x * ab.y - ao.y * ab.x) / denom;
+  float t = (ao.y * ab.x - ao.x * ab.y) / denom;
   float s = (ao.x * rd.y - ao.y * rd.x) / denom;
   if (t > 0.01 && s >= 0.0 && s <= 1.0) return t;
   return -1.0;
