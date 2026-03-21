@@ -151,36 +151,11 @@ void main() {
   // Shadow
   float shadow = shadowTest(u_lightPos, worldPos);
 
-  // Final illuminance (lux)
+  // Final illuminance (lux) — output linear for bounce pass
   float lux = u_peakCandela * u_intensity * photIntensity * falloff * shadow;
 
-  // Convert lux to visible brightness (tone mapping)
-  // Using filmic-style curve for nice rolloff
-  float brightness = 1.0 - exp(-lux * 0.003);
-
-  vec3 color = u_lightColor * brightness;
-
-  // Grid overlay
-  if (u_showGrid) {
-    vec2 gridPos = worldPos / u_gridScale;
-    vec2 grid = abs(fract(gridPos - 0.5) - 0.5);
-    float line = min(grid.x, grid.y);
-    float gridLine = 1.0 - smoothstep(0.0, 0.02, line);
-    // Subtle grid
-    vec3 gridColor = vec3(0.12) * gridLine;
-    color = max(color, gridColor * 0.4);
-  }
-
-  // Lux contours — thin lines at whole powers of 10 only
-  if (u_showLux && lux > 1.0) {
-    float logLux = log(lux) / log(10.0);
-    float frac1 = abs(fract(logLux) - 0.5) * 2.0;
-    // Very thin, subtle contour lines
-    float contour = 1.0 - smoothstep(0.0, 0.03, frac1);
-    color += vec3(0.6, 0.4, 0.15) * contour * 0.08;
-  }
-
-  fragColor = vec4(color, 1.0);
+  // Store linear lux * light color in FBO (tone mapping happens in display pass)
+  fragColor = vec4(u_lightColor * lux, 1.0);
 }
 `;
 
@@ -229,33 +204,43 @@ void main() {
     vec2 a = u_walls[w].xy;
     vec2 b = u_walls[w].zw;
 
-    // Sample a few points along the wall
-    for (int s = 0; s < 4; s++) {
-      float t = (float(s) + 0.5) / 4.0;
+    // Wall geometry
+    vec2 wallSegDir = normalize(b - a);
+    vec2 wallNormal = vec2(-wallSegDir.y, wallSegDir.x);
+    float wallLen = length(b - a);
+
+    // Determine which side of the wall our pixel is on
+    vec2 toPixel = worldPos - a;
+    float pixelSide = sign(dot(toPixel, wallNormal));
+
+    // Sample points along the wall
+    for (int s = 0; s < 8; s++) {
+      float t = (float(s) + 0.5) / 8.0;
       vec2 wallPt = mix(a, b, t);
       vec2 wallUV = worldToUV(wallPt);
 
       if (wallUV.x < 0.0 || wallUV.x > 1.0 || wallUV.y < 0.0 || wallUV.y > 1.0) continue;
 
-      // Light arriving at wall point
+      // Light arriving at wall point (linear lux)
       vec3 wallLight = texture(u_prevPass, wallUV).rgb;
 
-      // Distance and direction from wall point to our pixel
+      // Direction from wall point to our pixel
       vec2 toUs = worldPos - wallPt;
       float dist = length(toUs);
-      if (dist < 0.1) continue;
+      if (dist < 0.05) continue;
+      vec2 toUsDir = toUs / dist;
 
-      // Wall normal (perpendicular to wall segment)
-      vec2 wallDir = normalize(b - a);
-      vec2 wallNormal = vec2(-wallDir.y, wallDir.x);
+      // Cosine of angle between outgoing direction and wall normal
+      // Use the normal facing toward our pixel
+      vec2 faceNormal = wallNormal * pixelSide;
+      float cosOut = dot(toUsDir, faceNormal);
+      if (cosOut <= 0.0) continue; // behind the wall face
 
-      // Cosine factor (wall emits as lambertian)
-      float cosWall = abs(dot(normalize(toUs), wallNormal));
+      // Lambertian: reflected = incident * reflectance * cos(theta) / (pi * r^2)
+      float segLen = wallLen / 8.0;
+      float atten = cosOut * segLen / (3.14159 * (dist * dist + 0.01));
 
-      // Inverse square from wall to pixel
-      float atten = cosWall / (dist * dist + 1.0);
-
-      bounce += wallLight * atten * u_reflectance * 0.2;
+      bounce += wallLight * atten * u_reflectance;
     }
   }
 
@@ -263,7 +248,7 @@ void main() {
 }
 `;
 
-// Compositing / display pass
+// Compositing / display pass — tone mapping + overlays
 const FRAG_DISPLAY = `#version 300 es
 precision highp float;
 
@@ -271,9 +256,48 @@ in vec2 v_uv;
 out vec4 fragColor;
 
 uniform sampler2D u_lightTex;
+uniform vec2 u_resolution;
+uniform vec2 u_viewOffset;
+uniform float u_viewScale;
+uniform float u_gridScale;
+uniform bool u_showGrid;
+uniform bool u_showLux;
+
+vec2 uvToWorld(vec2 uv) {
+  vec2 ndc = (uv - 0.5) * u_resolution / u_viewScale;
+  ndc.y = -ndc.y;
+  return ndc + u_viewOffset;
+}
 
 void main() {
-  fragColor = texture(u_lightTex, v_uv);
+  vec3 linear = texture(u_lightTex, v_uv).rgb;
+
+  // Tone map from linear lux to display
+  float lum = dot(linear, vec3(0.2126, 0.7152, 0.0722));
+  float brightness = 1.0 - exp(-lum * 0.003);
+  vec3 color = (lum > 0.001) ? linear * (brightness / lum) : vec3(0.0);
+
+  vec2 worldPos = uvToWorld(v_uv);
+
+  // Grid overlay
+  if (u_showGrid) {
+    vec2 gridPos = worldPos / u_gridScale;
+    vec2 grid = abs(fract(gridPos - 0.5) - 0.5);
+    float line = min(grid.x, grid.y);
+    float gridLine = 1.0 - smoothstep(0.0, 0.02, line);
+    vec3 gridColor = vec3(0.12) * gridLine;
+    color = max(color, gridColor * 0.4);
+  }
+
+  // Lux contours
+  if (u_showLux && lum > 1.0) {
+    float logLux = log(lum) / log(10.0);
+    float frac1 = abs(fract(logLux) - 0.5) * 2.0;
+    float contour = 1.0 - smoothstep(0.0, 0.03, frac1);
+    color += vec3(0.6, 0.4, 0.15) * contour * 0.08;
+  }
+
+  fragColor = vec4(color, 1.0);
 }
 `;
 
@@ -569,6 +593,13 @@ export class Renderer {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.finalTex);
     gl.uniform1i(gl.getUniformLocation(disp, 'u_lightTex'), 0);
+
+    gl.uniform2f(gl.getUniformLocation(disp, 'u_resolution'), w, h);
+    gl.uniform2f(gl.getUniformLocation(disp, 'u_viewOffset'), this.viewOffset[0], this.viewOffset[1]);
+    gl.uniform1f(gl.getUniformLocation(disp, 'u_viewScale'), this.viewScale);
+    gl.uniform1f(gl.getUniformLocation(disp, 'u_gridScale'), gridScale);
+    gl.uniform1i(gl.getUniformLocation(disp, 'u_showGrid'), showGrid ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(disp, 'u_showLux'), showLux ? 1 : 0);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
