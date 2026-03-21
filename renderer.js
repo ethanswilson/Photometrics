@@ -62,6 +62,7 @@ uniform bool u_showLux;
 // Converts UV to world position
 vec2 uvToWorld(vec2 uv) {
   vec2 ndc = (uv - 0.5) * u_resolution / u_viewScale;
+  ndc.y = -ndc.y; // flip Y: WebGL UV origin is bottom-left, screen is top-left
   return ndc + u_viewOffset;
 }
 
@@ -69,7 +70,10 @@ vec2 uvToWorld(vec2 uv) {
 float sampleDist(float angleRad) {
   float angleDeg = abs(angleRad) * 57.2957795;
   float u = clamp(angleDeg / 180.0, 0.0, 1.0);
-  return texture(u_distTex, vec2(u, 0.5)).r;
+  float raw = texture(u_distTex, vec2(u, 0.5)).r;
+  // Add soft spill past beam edge — real fixtures have housing reflections / lens spill
+  float spill = exp(-angleDeg * 0.06) * 0.015;
+  return raw + spill;
 }
 
 // Segment intersection: returns t along ray or -1
@@ -199,11 +203,13 @@ uniform vec4 u_walls[64];
 
 vec2 uvToWorld(vec2 uv) {
   vec2 ndc = (uv - 0.5) * u_resolution / u_viewScale;
+  ndc.y = -ndc.y;
   return ndc + u_viewOffset;
 }
 
 vec2 worldToUV(vec2 world) {
   vec2 ndc = (world - u_viewOffset) * u_viewScale / u_resolution;
+  ndc.y = -ndc.y;
   return ndc + 0.5;
 }
 

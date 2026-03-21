@@ -97,9 +97,24 @@ function bindSlider(id, stateProp, transform, displayFn) {
 }
 
 bindSlider('intensity', 'intensity', v => v / 100, v => `${v}%`);
-bindSlider('beam-angle', 'beamAngleOverride', v => v, v => `${v}°`);
 bindSlider('zoom', 'zoom', v => v / 100, v => `${v}%`);
 bindSlider('direction', 'lightDir', v => v * Math.PI / 180, v => `${v}°`);
+
+// Beam angle slider drives zoom based on fixture's zoom range
+const beamAngleEl = document.getElementById('beam-angle');
+const beamAngleValEl = document.getElementById('beam-angle-val');
+beamAngleEl.addEventListener('input', () => {
+  const angle = parseFloat(beamAngleEl.value);
+  beamAngleValEl.textContent = `${angle}°`;
+  const fixture = FIXTURES[state.fixtureKey];
+  if (fixture.zoomRange) {
+    const [minA, maxA] = fixture.zoomRange;
+    const t = Math.max(0, Math.min(1, (angle - minA) / (maxA - minA)));
+    state.zoom = t;
+    document.getElementById('zoom').value = t * 100;
+    document.getElementById('zoom-val').textContent = `${Math.round(t * 100)}%`;
+  }
+});
 bindSlider('diffusion', 'diffusionAmount', v => v, v => `${v}%`);
 bindSlider('source-size', 'sourceSize', v => v / 100, v => `${v}%`);
 bindSlider('grid-scale', 'gridScale', v => v * 0.5, v => `${(v * 0.5).toFixed(1)}m`);
@@ -117,6 +132,19 @@ lightTypeSelect.addEventListener('change', () => {
   document.getElementById('source-size-val').textContent = `${Math.round(fixture.sourceSize * 100)}%`;
   document.getElementById('color-temp').value = fixture.colorTemp;
   document.getElementById('cct-val').textContent = `${fixture.colorTemp}K`;
+  // Update beam angle slider range
+  if (fixture.zoomRange) {
+    beamAngleEl.min = fixture.zoomRange[0];
+    beamAngleEl.max = fixture.zoomRange[1];
+    const angle = fixture.zoomRange[0] + state.zoom * (fixture.zoomRange[1] - fixture.zoomRange[0]);
+    beamAngleEl.value = Math.round(angle);
+    beamAngleValEl.textContent = `${Math.round(angle)}°`;
+  } else {
+    beamAngleEl.min = fixture.beamAngle;
+    beamAngleEl.max = fixture.beamAngle;
+    beamAngleEl.value = fixture.beamAngle;
+    beamAngleValEl.textContent = `${fixture.beamAngle}°`;
+  }
 });
 
 document.getElementById('diffusion-type').addEventListener('change', (e) => {
