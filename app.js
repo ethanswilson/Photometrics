@@ -228,7 +228,7 @@ function screenToWorld(sx, sy) {
   const w = canvas.width;
   const h = canvas.height;
   const wx = (px - w / 2) / renderer.viewScale + renderer.viewOffset[0];
-  const wy = (py - h / 2) / renderer.viewScale + renderer.viewOffset[1];
+  const wy = -(py - h / 2) / renderer.viewScale + renderer.viewOffset[1];
   return [wx, wy];
 }
 
@@ -275,7 +275,7 @@ canvas.parentElement.addEventListener('mousemove', (e) => {
     const dx = (e.clientX - lastMouse[0]) * dpr / renderer.viewScale;
     const dy = (e.clientY - lastMouse[1]) * dpr / renderer.viewScale;
     renderer.viewOffset[0] -= dx;
-    renderer.viewOffset[1] -= dy;
+    renderer.viewOffset[1] += dy;
     lastMouse = [e.clientX, e.clientY];
   }
 });
@@ -386,7 +386,7 @@ canvas.parentElement.addEventListener('touchmove', (e) => {
       const dx = (center[0] - lastTouchCenter[0]) * dpr / renderer.viewScale;
       const dy = (center[1] - lastTouchCenter[1]) * dpr / renderer.viewScale;
       renderer.viewOffset[0] -= dx;
-      renderer.viewOffset[1] -= dy;
+      renderer.viewOffset[1] += dy;
     }
 
     // Pinch zoom

@@ -609,7 +609,7 @@ export class Renderer {
     // World to screen transform
     const worldToScreen = (wx, wy) => {
       const sx = (wx - this.viewOffset[0]) * this.viewScale + w / 2;
-      const sy = (wy - this.viewOffset[1]) * this.viewScale + h / 2;
+      const sy = -(wy - this.viewOffset[1]) * this.viewScale + h / 2;
       return [sx, sy];
     };
 
