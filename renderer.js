@@ -353,10 +353,10 @@ void main() {
 
     // Pixel in wall-aligned coordinates
     float pu = dot(worldPos - a, wDir);  // along wall
-    float pn = max(perpDist, 0.1);       // perpendicular (clamped to avoid singularity)
+    float pn = max(perpDist, 0.3);       // perpendicular (clamped to tame near-wall intensity)
 
-    // 8 sub-segments: analytical form factor + sampled light
-    const int N = 8;
+    // 16 sub-segments: analytical form factor + sampled light
+    const int N = 16;
     for (int s = 0; s < N; s++) {
       float s0 = float(s) / float(N) * wLen;
       float s1 = float(s + 1) / float(N) * wLen;
@@ -369,7 +369,7 @@ void main() {
       // so we read the actual illumination on the correct face
       float tMid = (float(s) + 0.5) / float(N);
       vec2 wallPt = mix(a, b, tMid);
-      vec2 samplePt = wallPt + faceN * 0.05;
+      vec2 samplePt = wallPt + faceN * 0.08;
       vec2 uv = worldToUV(samplePt);
       if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) continue;
 
