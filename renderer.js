@@ -266,15 +266,18 @@ void main() {
 }
 `;
 
-// Bounce lighting pass
+// Bounce lighting pass — half-res, Jacobi iteration
+// Reads direct light (full res) + previous bounce (half res),
+// outputs ONLY bounce contribution (not direct).
 const FRAG_BOUNCE = `#version 300 es
 precision highp float;
 
 in vec2 v_uv;
 out vec4 fragColor;
 
-uniform sampler2D u_prevPass;  // previous illumination
-uniform vec2 u_resolution;
+uniform sampler2D u_directTex;   // full-res direct illumination (constant)
+uniform sampler2D u_prevBounce;  // half-res previous bounce accumulation
+uniform vec2 u_resolution;      // FULL canvas resolution (for coordinate mapping)
 uniform vec2 u_viewOffset;
 uniform float u_viewScale;
 uniform float u_reflectance;
@@ -323,17 +326,7 @@ bool isOccluded(vec2 from, vec2 to, int skipW) {
   return false;
 }
 
-// Analytical form factor term for 2D line → point (Lambertian, 1/r² falloff)
-// Evaluates the antiderivative of cos(θ)/r² along the wall at parameter s
-// pu = pixel position along wall axis, pn = perpendicular distance
-float ffTerm(float pu, float pn, float s) {
-  float u = pu - s;
-  return u / (pn * sqrt(u * u + pn * pn));
-}
-
 void main() {
-  vec3 existing = texture(u_prevPass, v_uv).rgb;
-
   vec3 bounce = vec3(0.0);
   vec2 worldPos = uvToWorld(v_uv);
 
@@ -354,40 +347,46 @@ void main() {
     float side = sign(dot(worldPos - a, wNorm));
     vec2 faceN = wNorm * side;
     float perpDist = abs(dot(worldPos - a, wNorm));
-    if (perpDist < 0.05) continue; // too close to wall plane
+    if (perpDist < 0.05) continue;
 
     // Pixel in wall-aligned coordinates
-    float pu = dot(worldPos - a, wDir);  // along wall
-    float pn = max(perpDist, 0.3);       // perpendicular (clamped to tame near-wall intensity)
+    float pu = dot(worldPos - a, wDir);
+    float pn = max(perpDist, 0.05);  // atan form factor is bounded, mild clamp ok
 
-    // 16 sub-segments: analytical form factor + sampled light
-    const int N = 16;
+    // Early reject: total form factor for entire wall
+    float ffTotal = (atan((pu) / pn) - atan((pu - wLen) / pn)) / 3.14159;
+    if (ffTotal < 0.001) continue;
+
+    // 12 sub-segments with analytical 2D form factors (atan-based, energy-conserving)
+    // Using cos(θ)/r falloff — correct for 2D radiosity with tall walls.
+    // Form factor = [atan(u0/pn) - atan(u1/pn)] / π, bounded in [0, 1].
+    const int N = 12;
     for (int s = 0; s < N; s++) {
       float s0 = float(s) / float(N) * wLen;
       float s1 = float(s + 1) / float(N) * wLen;
 
-      // Analytical form factor for this sub-segment (exact integral of cos/r²)
-      float ff = (ffTerm(pu, pn, s0) - ffTerm(pu, pn, s1)) / 3.14159;
+      // Analytical sub-segment form factor
+      float ff = (atan((pu - s0) / pn) - atan((pu - s1) / pn)) / 3.14159;
       if (ff <= 0.0) continue;
 
-      // Sample light at sub-segment midpoint, offset toward pixel's side
-      // so we read the actual illumination on the correct face
+      // Sample total light at wall midpoint (direct + previous bounce)
       float tMid = (float(s) + 0.5) / float(N);
       vec2 wallPt = mix(a, b, tMid);
       vec2 samplePt = wallPt + faceN * 0.08;
       vec2 uv = worldToUV(samplePt);
       if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) continue;
 
-      vec3 wallLight = texture(u_prevPass, uv).rgb;
+      vec3 wallLight = texture(u_directTex, uv).rgb + texture(u_prevBounce, uv).rgb;
 
-      // Occlusion: is the path from wall to pixel blocked?
+      // Occlusion
       if (isOccluded(wallPt + faceN * 0.02, worldPos, w)) continue;
 
       bounce += wallLight * ff * u_reflectance;
     }
   }
 
-  fragColor = vec4(min(existing + bounce, vec3(60000.0)), 1.0);
+  // Output bounce ONLY (not direct) — Jacobi iteration: bounce_n = ρ·gather(direct + bounce_{n-1})
+  fragColor = vec4(min(bounce, vec3(60000.0)), 1.0);
 }
 `;
 
@@ -398,7 +397,8 @@ precision highp float;
 in vec2 v_uv;
 out vec4 fragColor;
 
-uniform sampler2D u_lightTex;
+uniform sampler2D u_directTex;  // full-res direct illumination
+uniform sampler2D u_bounceTex;  // half-res bounce (bilinear upsampled)
 uniform vec2 u_resolution;
 uniform vec2 u_viewOffset;
 uniform float u_viewScale;
@@ -413,9 +413,9 @@ vec2 uvToWorld(vec2 uv) {
 }
 
 void main() {
-  vec3 linear = max(texture(u_lightTex, v_uv).rgb, vec3(0.0));
-  // Guard against Inf/NaN from half-float overflow
-  linear = min(linear, vec3(60000.0));
+  vec3 direct = max(texture(u_directTex, v_uv).rgb, vec3(0.0));
+  vec3 bounce = max(texture(u_bounceTex, v_uv).rgb, vec3(0.0));
+  vec3 linear = min(direct + bounce, vec3(60000.0));
 
   // Tone map from linear lux to display
   float lum = dot(linear, vec3(0.2126, 0.7152, 0.0722));
@@ -424,14 +424,30 @@ void main() {
 
   vec2 worldPos = uvToWorld(v_uv);
 
-  // Grid overlay
+  // Grid overlay — minor + major lines
   if (u_showGrid) {
+    // Pixel size in world units (for resolution-independent line width)
+    float pxWorld = 1.0 / u_viewScale;
+
+    // Minor grid
     vec2 gridPos = worldPos / u_gridScale;
-    vec2 grid = abs(fract(gridPos - 0.5) - 0.5);
-    float line = min(grid.x, grid.y);
-    float gridLine = 1.0 - smoothstep(0.0, 0.02, line);
-    vec3 gridColor = vec3(0.12) * gridLine;
-    color = max(color, gridColor * 0.4);
+    vec2 grid = abs(fract(gridPos - 0.5) - 0.5) * u_gridScale;
+    float minorLine = 1.0 - smoothstep(0.0, pxWorld * 1.5, min(grid.x, grid.y));
+
+    // Major grid (every 5 cells)
+    float majorScale = u_gridScale * 5.0;
+    vec2 majorPos = worldPos / majorScale;
+    vec2 majorGrid = abs(fract(majorPos - 0.5) - 0.5) * majorScale;
+    float majorLine = 1.0 - smoothstep(0.0, pxWorld * 2.5, min(majorGrid.x, majorGrid.y));
+
+    // Origin axes (x=0, y=0)
+    float axisX = 1.0 - smoothstep(0.0, pxWorld * 3.0, abs(worldPos.y));
+    float axisY = 1.0 - smoothstep(0.0, pxWorld * 3.0, abs(worldPos.x));
+    float axisLine = max(axisX, axisY);
+
+    // Composite: minor=dim, major=medium, axes=bright
+    float gridAlpha = max(max(minorLine * 0.12, majorLine * 0.25), axisLine * 0.4);
+    color = max(color, vec3(gridAlpha));
   }
 
   // Lux contours
@@ -561,8 +577,9 @@ export class Renderer {
 
   _initFBOs() {
     // We'll create these on resize
-    this.fboA = null;
-    this.fboB = null;
+    this.fboA = null;         // Full-res direct light
+    this.fboBounceA = null;   // Half-res bounce ping-pong
+    this.fboBounceB = null;   // Half-res bounce ping-pong
   }
 
   _createFBO(width, height) {
@@ -609,17 +626,18 @@ export class Renderer {
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
-      // Recreate FBOs
-      if (this.fboA) {
-        this.gl.deleteFramebuffer(this.fboA.fbo);
-        this.gl.deleteTexture(this.fboA.tex);
+      const gl = this.gl;
+      // Clean up old FBOs
+      for (const fbo of [this.fboA, this.fboBounceA, this.fboBounceB]) {
+        if (fbo) { gl.deleteFramebuffer(fbo.fbo); gl.deleteTexture(fbo.tex); }
       }
-      if (this.fboB) {
-        this.gl.deleteFramebuffer(this.fboB.fbo);
-        this.gl.deleteTexture(this.fboB.tex);
-      }
+      // Full-res for direct light
       this.fboA = this._createFBO(w, h);
-      this.fboB = this._createFBO(w, h);
+      // Half-res for bounce (4x fewer pixels)
+      const hw = Math.max(1, w >> 1);
+      const hh = Math.max(1, h >> 1);
+      this.fboBounceA = this._createFBO(hw, hh);
+      this.fboBounceB = this._createFBO(hw, hh);
     }
   }
 
@@ -695,12 +713,20 @@ export class Renderer {
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    // ---- Pass 2+: Bounce passes ----
+    // ---- Pass 2+: Bounce passes at HALF resolution ----
+    // Jacobi iteration: bounce_n = ρ·gather(direct + bounce_{n-1})
+    // Output is bounce-only; display composites direct + bounce.
+    let bounceTex = this.fboBounceA.tex; // default: zero bounce
     if (bounceEnabled && walls.length > 0) {
       const bp = this.programs.bounce;
       gl.useProgram(bp);
       gl.bindVertexArray(this.quadVAO);
 
+      const hw = this.fboBounceA.width;
+      const hh = this.fboBounceA.height;
+      gl.viewport(0, 0, hw, hh);
+
+      // Use FULL resolution for coordinate mapping (UV→world stays consistent)
       gl.uniform2f(gl.getUniformLocation(bp, 'u_resolution'), w, h);
       gl.uniform2f(gl.getUniformLocation(bp, 'u_viewOffset'), this.viewOffset[0], this.viewOffset[1]);
       gl.uniform1f(gl.getUniformLocation(bp, 'u_viewScale'), this.viewScale);
@@ -717,29 +743,36 @@ export class Renderer {
         );
       }
 
-      let src = this.fboA;
-      let dst = this.fboB;
+      // Direct light always on texture unit 0
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.fboA.tex);
+      gl.uniform1i(gl.getUniformLocation(bp, 'u_directTex'), 0);
+
+      // Clear initial bounce to zero
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboBounceA.fbo);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      let src = this.fboBounceA;  // previous bounce (starts at 0)
+      let dst = this.fboBounceB;
 
       for (let pass = 0; pass < bouncePasses; pass++) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
         gl.clear(gl.COLOR_BUFFER_BIT);
 
-        gl.activeTexture(gl.TEXTURE0);
+        // Previous bounce on texture unit 1
+        gl.activeTexture(gl.TEXTURE1);
         gl.bindTexture(gl.TEXTURE_2D, src.tex);
-        gl.uniform1i(gl.getUniformLocation(bp, 'u_prevPass'), 0);
+        gl.uniform1i(gl.getUniformLocation(bp, 'u_prevBounce'), 1);
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-        // Swap
         [src, dst] = [dst, src];
       }
-      // Result is in `src` after swaps
-      this.finalTex = src.tex;
-    } else {
-      this.finalTex = this.fboA.tex;
+      bounceTex = src.tex;
     }
 
-    // ---- Final: Display to screen ----
+    // ---- Final: Display to screen (full resolution) ----
+    gl.viewport(0, 0, w, h);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -747,9 +780,15 @@ export class Renderer {
     gl.useProgram(disp);
     gl.bindVertexArray(this.quadVAO);
 
+    // Direct light (full res) on unit 0
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.finalTex);
-    gl.uniform1i(gl.getUniformLocation(disp, 'u_lightTex'), 0);
+    gl.bindTexture(gl.TEXTURE_2D, this.fboA.tex);
+    gl.uniform1i(gl.getUniformLocation(disp, 'u_directTex'), 0);
+
+    // Bounce (half res, bilinear upsampled) on unit 1
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, bounceTex);
+    gl.uniform1i(gl.getUniformLocation(disp, 'u_bounceTex'), 1);
 
     gl.uniform2f(gl.getUniformLocation(disp, 'u_resolution'), w, h);
     gl.uniform2f(gl.getUniformLocation(disp, 'u_viewOffset'), this.viewOffset[0], this.viewOffset[1]);
@@ -765,7 +804,7 @@ export class Renderer {
    * Draw walls and light icon as an overlay using 2D canvas
    */
   drawOverlay(ctx, params) {
-    const { lightPos, lightDir, walls, wallTypes, sourceSize } = params;
+    const { lightPos, lightDir, walls, wallTypes, sourceSize, gridScale, showGrid } = params;
     const wTypes = wallTypes || [];
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
@@ -862,5 +901,40 @@ export class Renderer {
     ctx.fill();
 
     ctx.restore();
+
+    // Grid distance labels (on major grid lines)
+    if (showGrid && gridScale > 0) {
+      const majorScale = gridScale * 5;
+      const dpr = window.devicePixelRatio || 1;
+      const fontSize = Math.round(11 * dpr);
+      ctx.font = `${fontSize}px monospace`;
+      ctx.fillStyle = 'rgba(255,255,255,0.45)';
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+
+      // Compute visible world bounds
+      const worldLeft = this.viewOffset[0] - w / (2 * this.viewScale);
+      const worldRight = this.viewOffset[0] + w / (2 * this.viewScale);
+      const worldTop = this.viewOffset[1] - h / (2 * this.viewScale);
+      const worldBottom = this.viewOffset[1] + h / (2 * this.viewScale);
+
+      // Label major vertical lines (x-axis values)
+      const xStart = Math.ceil(worldLeft / majorScale) * majorScale;
+      for (let x = xStart; x <= worldRight; x += majorScale) {
+        const [sx] = worldToScreen(x, 0);
+        // Place label near top of screen
+        const label = x === 0 ? '0' : `${x.toFixed(x % 1 === 0 ? 0 : 1)}m`;
+        ctx.fillText(label, sx + 3 * dpr, 4 * dpr);
+      }
+
+      // Label major horizontal lines (y-axis values)
+      ctx.textBaseline = 'bottom';
+      const yStart = Math.ceil(worldTop / majorScale) * majorScale;
+      for (let y = yStart; y <= worldBottom; y += majorScale) {
+        const [, sy] = worldToScreen(0, y);
+        const label = y === 0 ? '0' : `${y.toFixed(y % 1 === 0 ? 0 : 1)}m`;
+        ctx.fillText(label, 4 * dpr, sy - 3 * dpr);
+      }
+    }
   }
 }

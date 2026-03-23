@@ -536,6 +536,8 @@ function update() {
     walls: state.walls,
     wallTypes: state.wallTypes,
     sourceSize: effectiveSourceSize,
+    gridScale: state.gridScale,
+    showGrid: state.showGrid,
   });
 
   requestAnimationFrame(update);
