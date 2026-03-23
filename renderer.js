@@ -91,48 +91,83 @@ float segIntersect(vec2 ro, vec2 rd, vec2 a, vec2 b) {
   return -1.0;
 }
 
-// Shadow test with source-size-based soft penumbra (tent-weighted samples)
+// Shadow test — analytical soft shadow based on source size
+// For each wall, computes the shadow cone from each endpoint and blends
+// smoothly through the penumbra zone. No sampling = no banding artifacts.
 float shadowTest(vec2 origin, vec2 target, int skipW) {
   vec2 dir = target - origin;
   float dist = length(dir);
   if (dist < 0.001) return 1.0;
   vec2 rd = dir / dist;
-  vec2 perp = vec2(-rd.y, rd.x);
 
-  // Penumbra radius scales with source size (world-space half-width)
-  float penumbraR = u_sourceSize * 0.3;
-  int samples = (penumbraR > 0.015) ? 9 : 1;
+  float penumbraR = u_sourceSize * 0.15;
+  float shadow = 1.0;
 
-  float lit = 0.0;
-  float totalWeight = 0.0;
+  for (int w = 0; w < 64; w++) {
+    if (w >= u_wallCount) break;
+    if (w == skipW) continue;
 
-  for (int s = 0; s < 9; s++) {
-    if (s >= samples) break;
-    float t01 = float(s) / float(max(samples - 1, 1));
-    float offset = (t01 - 0.5) * 2.0 * penumbraR;
-    // Tent filter: peak at center, zero at edges — smooth penumbra
-    float weight = 1.0 - abs(t01 - 0.5) * 2.0;
-    weight = max(weight, 0.1); // minimum weight at edges
+    vec2 a = u_walls[w].xy;
+    vec2 b = u_walls[w].zw;
 
-    vec2 sOrigin = origin + perp * offset;
-    vec2 sDir = target - sOrigin;
-    float sDist = length(sDir);
-    vec2 sRd = sDir / sDist;
+    // Quick reject: wall must be between source and target
+    vec2 oa = a - origin;
+    vec2 ob = b - origin;
+    float projA = dot(oa, rd);
+    float projB = dot(ob, rd);
+    if (projA < 0.0 && projB < 0.0) continue;
+    if (projA > dist && projB > dist) continue;
 
-    bool blocked = false;
-    for (int w = 0; w < 64; w++) {
-      if (w >= u_wallCount) break;
-      if (w == skipW) continue;
-      float t = segIntersect(sOrigin, sRd, u_walls[w].xy, u_walls[w].zw);
-      if (t > 0.001 && t < sDist - 0.001) {
-        blocked = true;
-        break;
-      }
+    if (penumbraR < 0.005) {
+      // Hard shadow — point source
+      float t = segIntersect(origin, rd, a, b);
+      if (t > 0.001 && t < dist - 0.001) return 0.0;
+      continue;
     }
-    if (!blocked) lit += weight;
-    totalWeight += weight;
+
+    // Analytical soft shadow from each endpoint's shadow boundary
+    // Shadow boundary = line from source center through wall endpoint
+    // Penumbra transitions smoothly across this boundary
+    float wallShadow = 0.0;
+
+    for (int e = 0; e < 2; e++) {
+      vec2 ep = (e == 0) ? a : b;
+      vec2 otherEp = (e == 0) ? b : a;
+
+      vec2 boundaryDir = ep - origin;
+      float boundaryLen = length(boundaryDir);
+      if (boundaryLen < 0.001) continue;
+      boundaryDir /= boundaryLen;
+
+      // Signed perpendicular distance of the pixel from this shadow boundary
+      vec2 toTarget = target - origin;
+      float signedDist = toTarget.x * boundaryDir.y - toTarget.y * boundaryDir.x;
+
+      // Which side of the boundary is the wall interior?
+      vec2 toOther = otherEp - origin;
+      float otherSide = toOther.x * boundaryDir.y - toOther.y * boundaryDir.x;
+
+      // Penumbra width grows with distance past the wall endpoint
+      float pastEP = max(dot(target - ep, boundaryDir), 0.0);
+      float pw = penumbraR * pastEP / max(boundaryLen, 0.01);
+      pw = clamp(pw, 0.01, penumbraR * 5.0);
+
+      // Shadow factor: 0 = in shadow, 1 = lit
+      // Smooth transition centered on the boundary line
+      float s;
+      if (otherSide > 0.0) {
+        s = smoothstep(-pw, pw, -signedDist);
+      } else {
+        s = smoothstep(-pw, pw, signedDist);
+      }
+
+      wallShadow = max(wallShadow, s);
+    }
+
+    shadow = min(shadow, wallShadow);
   }
-  return lit / totalWeight;
+
+  return shadow;
 }
 
 // Reflect point across a line defined by two points
