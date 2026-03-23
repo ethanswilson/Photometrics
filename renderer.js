@@ -63,6 +63,8 @@ uniform bool u_showLux;
 
 // Overhead mount height (0 = in-plane, >0 = overhead pointing down)
 uniform float u_mountHeight;
+// Tilt from vertical: 0 = straight down, PI/2 = horizontal
+uniform float u_tiltAngle;
 
 // Converts UV to world position
 vec2 uvToWorld(vec2 uv) {
@@ -185,16 +187,28 @@ void main() {
   float falloff;
 
   if (u_mountHeight > 0.0) {
-    // Overhead light pointing straight down:
-    // 3D distance from fixture (at height h) to floor point
-    float dist3D = sqrt(dist2D * dist2D + u_mountHeight * u_mountHeight);
-    // Photometric angle = angle from nadir (vertical down)
-    float angleFromNadir = atan(dist2D, u_mountHeight);
-    photIntensity = sampleDist(angleFromNadir);
+    // Overhead light at height h, tilted by tiltAngle from vertical
+    // toward lightDir direction
+    float h = u_mountHeight;
+    float dist3D = sqrt(dist2D * dist2D + h * h);
+
+    // 3D aim axis: (sin(tilt)*cos(dir), sin(tilt)*sin(dir), -cos(tilt))
+    float sinTilt = sin(u_tiltAngle);
+    float cosTilt = cos(u_tiltAngle);
+    vec2 aimDir2D = vec2(cos(u_lightDir), sin(u_lightDir));
+
+    // dot(aim3D, toPoint3D) where toPoint3D = (dx, dy, -h)
+    float dotAV = sinTilt * dot(aimDir2D, toPoint) + cosTilt * h;
+
+    // Photometric angle = angle between aim axis and vector to floor point
+    float cosPhotAngle = clamp(dotAV / dist3D, -1.0, 1.0);
+    float photAngle = acos(cosPhotAngle);
+
+    photIntensity = sampleDist(photAngle);
     // Inverse square on 3D distance
     falloff = 1.0 / max(dist3D * dist3D, 0.01);
-    // Lambert's cosine: floor incidence angle
-    falloff *= u_mountHeight / dist3D;
+    // Lambert's cosine: floor incidence angle (h / dist3D)
+    falloff *= h / dist3D;
   } else {
     // In-plane beam light (existing behavior)
     float pointAngle = atan(toPoint.y, toPoint.x);
@@ -259,11 +273,16 @@ void main() {
     float vPhotIntensity;
     float vFalloff;
     if (u_mountHeight > 0.0) {
-      // Overhead: mirror redirects light, use 3D distance from virtual source
-      float vDist3D = sqrt(vDist * vDist + u_mountHeight * u_mountHeight);
-      float vAngleFromNadir = atan(vDist, u_mountHeight);
-      vPhotIntensity = sampleDist(vAngleFromNadir);
-      vFalloff = u_mountHeight / (vDist3D * vDist3D * vDist3D);
+      // Overhead with tilt: apply same 3D tilt math to virtual source
+      float vh = u_mountHeight;
+      float vDist3D = sqrt(vDist * vDist + vh * vh);
+      float vSinTilt = sin(u_tiltAngle);
+      float vCosTilt = cos(u_tiltAngle);
+      vec2 vAimDir2D = vec2(cos(vDir), sin(vDir));
+      float vDotAV = vSinTilt * dot(vAimDir2D, vToP) + vCosTilt * vh;
+      float vCosPhot = clamp(vDotAV / vDist3D, -1.0, 1.0);
+      vPhotIntensity = sampleDist(acos(vCosPhot));
+      vFalloff = vh / (vDist3D * vDist3D * vDist3D);
     } else {
       float vAngle = atan(vToP.y, vToP.x);
       float vRelAngle = vAngle - vDir;
@@ -680,7 +699,7 @@ export class Renderer {
     const {
       lightPos, lightDir, intensity, peakCandela, lightColor,
       sourceSize, walls, wallTypes, gridScale, showGrid, showLux,
-      bounceEnabled, bouncePasses, reflectance, mountHeight
+      bounceEnabled, bouncePasses, reflectance, mountHeight, tiltAngle
     } = params;
 
     const w = this.canvas.width;
@@ -733,6 +752,7 @@ export class Renderer {
     gl.uniform1i(gl.getUniformLocation(dp, 'u_showGrid'), showGrid ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(dp, 'u_showLux'), showLux ? 1 : 0);
     gl.uniform1f(gl.getUniformLocation(dp, 'u_mountHeight'), mountHeight || 0);
+    gl.uniform1f(gl.getUniformLocation(dp, 'u_tiltAngle'), tiltAngle || 0);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
@@ -833,7 +853,7 @@ export class Renderer {
    * Draw walls and light icon as an overlay using 2D canvas
    */
   drawOverlay(ctx, params) {
-    const { lightPos, lightDir, walls, wallTypes, sourceSize, mountHeight, gridScale, showGrid } = params;
+    const { lightPos, lightDir, walls, wallTypes, sourceSize, mountHeight, tiltAngle, gridScale, showGrid } = params;
     const wTypes = wallTypes || [];
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
@@ -904,7 +924,7 @@ export class Renderer {
     ctx.translate(lx, ly);
 
     if (isOverhead) {
-      // Overhead icon: concentric circles (top-down view of downward-facing light)
+      // Overhead icon: concentric circles with tilt direction arrow
       ctx.fillStyle = 'rgba(255, 153, 0, 0.3)';
       ctx.beginPath();
       ctx.arc(0, 0, iconSize * 1.6, 0, Math.PI * 2);
@@ -918,22 +938,49 @@ export class Renderer {
       ctx.fill();
       ctx.stroke();
 
-      // Crosshair (pointing down into plane)
-      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-      ctx.lineWidth = 1.5;
-      const cr = iconSize * 0.6;
-      ctx.beginPath();
-      ctx.moveTo(-cr, 0); ctx.lineTo(cr, 0);
-      ctx.moveTo(0, -cr); ctx.lineTo(0, cr);
-      ctx.stroke();
+      const tilt = tiltAngle || 0;
+      if (tilt > 0.05) {
+        // Tilt direction arrow — length proportional to tilt angle
+        const arrowLen = iconSize * 0.5 + iconSize * 1.2 * (tilt / (Math.PI / 2));
+        ctx.save();
+        ctx.rotate(lightDir);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(arrowLen, 0);
+        ctx.stroke();
+        // Arrow head
+        ctx.beginPath();
+        ctx.moveTo(arrowLen, 0);
+        ctx.lineTo(arrowLen - 5, -3);
+        ctx.lineTo(arrowLen - 5, 3);
+        ctx.closePath();
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // Crosshair for straight-down (no tilt)
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 1.5;
+        const cr = iconSize * 0.6;
+        ctx.beginPath();
+        ctx.moveTo(-cr, 0); ctx.lineTo(cr, 0);
+        ctx.moveTo(0, -cr); ctx.lineTo(0, cr);
+        ctx.stroke();
+      }
 
-      // Height label
+      // Height + tilt label
       const dpr = window.devicePixelRatio || 1;
       ctx.font = `${Math.round(10 * dpr)}px monospace`;
       ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillText(`${mountHeight.toFixed(1)}m`, 0, iconSize + 4 * dpr);
+      const tiltDeg = Math.round((tilt / Math.PI) * 180);
+      const label = tiltDeg > 0
+        ? `${mountHeight.toFixed(1)}m / ${tiltDeg}°`
+        : `${mountHeight.toFixed(1)}m`;
+      ctx.fillText(label, 0, iconSize + 4 * dpr);
     } else {
       ctx.rotate(lightDir);
 

@@ -34,6 +34,7 @@ const state = {
   diffusionAmount: 0,
   sourceSize: 0.12,
   mountHeight: 0,         // 0 = in-plane, >0 = overhead (meters above floor)
+  tiltAngle: 0,           // radians from vertical: 0 = straight down, PI/2 = horizontal
   colorTemp: 5600,
   gridScale: 1.0,
   showGrid: true,
@@ -105,6 +106,7 @@ bindSlider('intensity', 'intensity', v => v / 100, v => `${v}%`);
 bindSlider('zoom', 'zoom', v => v / 100, v => `${v}%`);
 bindSlider('direction', 'lightDir', v => v * Math.PI / 180, v => `${v}°`);
 bindSlider('mount-height', 'mountHeight', v => v * 0.1, v => `${(v * 0.1).toFixed(1)}m`);
+bindSlider('tilt-angle', 'tiltAngle', v => v * Math.PI / 180, v => `${v}°`);
 
 // Beam angle slider drives zoom and also stores override for angles beyond fixture range
 const beamAngleEl = document.getElementById('beam-angle');
@@ -139,16 +141,24 @@ lightTypeSelect.addEventListener('change', () => {
   document.getElementById('source-size-val').textContent = `${Math.round(fixture.sourceSize * 100)}%`;
   document.getElementById('color-temp').value = fixture.colorTemp;
   document.getElementById('cct-val').textContent = `${fixture.colorTemp}K`;
-  // Auto-set mount height for overhead fixtures
+  // Auto-set mount height and tilt for overhead fixtures
   if (fixture.overhead && fixture.defaultMountHeight) {
     state.mountHeight = fixture.defaultMountHeight;
     const sliderVal = Math.round(fixture.defaultMountHeight * 10);
     document.getElementById('mount-height').value = sliderVal;
     document.getElementById('mount-height-val').textContent = `${fixture.defaultMountHeight.toFixed(1)}m`;
+
+    const tiltDeg = fixture.defaultTiltAngle || 0;
+    state.tiltAngle = tiltDeg * Math.PI / 180;
+    document.getElementById('tilt-angle').value = tiltDeg;
+    document.getElementById('tilt-angle-val').textContent = `${tiltDeg}°`;
   } else {
     state.mountHeight = 0;
     document.getElementById('mount-height').value = 0;
     document.getElementById('mount-height-val').textContent = '0m';
+    state.tiltAngle = 0;
+    document.getElementById('tilt-angle').value = 0;
+    document.getElementById('tilt-angle-val').textContent = '0°';
   }
   // Update beam angle slider range
   if (fixture.zoomRange) {
@@ -540,6 +550,7 @@ function update() {
     bouncePasses: state.bouncePasses,
     reflectance: state.wallReflectance,
     mountHeight: state.mountHeight,
+    tiltAngle: state.tiltAngle,
   });
 
   // Overlay
@@ -551,6 +562,7 @@ function update() {
     wallTypes: state.wallTypes,
     sourceSize: effectiveSourceSize,
     mountHeight: state.mountHeight,
+    tiltAngle: state.tiltAngle,
     gridScale: state.gridScale,
     showGrid: state.showGrid,
   });

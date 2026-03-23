@@ -305,6 +305,7 @@ export const FIXTURES = {
     colorTemp: 3200,
     overhead: true,
     defaultMountHeight: 4.0,
+    defaultTiltAngle: 0,      // straight down
     // Distribution from nadir: very wide, soft wrap-around
     candelaDistribution: [
       [0, 1.0], [10, 0.98], [20, 0.94], [30, 0.88], [40, 0.80],
@@ -327,6 +328,7 @@ export const FIXTURES = {
     colorTemp: 3200,
     overhead: true,
     defaultMountHeight: 3.0,
+    defaultTiltAngle: 0,      // straight down
     candelaDistribution: [
       [0, 1.0], [10, 0.98], [20, 0.94], [30, 0.88], [40, 0.80],
       [50, 0.70], [60, 0.58], [70, 0.44], [75, 0.35], [80, 0.25],
@@ -349,6 +351,7 @@ export const FIXTURES = {
     colorTemp: 3200,
     overhead: true,
     defaultMountHeight: 2.5,
+    defaultTiltAngle: 35,     // tilted forward toward subject
     // Soft box: moderately directed, smooth falloff
     candelaDistribution: [
       [0, 1.0], [5, 0.99], [10, 0.96], [15, 0.92], [20, 0.85],
@@ -372,6 +375,7 @@ export const FIXTURES = {
     colorTemp: 3200,
     overhead: true,
     defaultMountHeight: 3.0,
+    defaultTiltAngle: 30,     // tilted forward toward subject
     candelaDistribution: [
       [0, 1.0], [5, 0.99], [10, 0.97], [15, 0.93], [20, 0.87],
       [25, 0.78], [30, 0.67], [35, 0.55], [40, 0.42], [45, 0.30],
@@ -394,6 +398,7 @@ export const FIXTURES = {
     colorTemp: 3200,
     overhead: true,
     defaultMountHeight: 2.5,
+    defaultTiltAngle: 0,      // lanterns are omni, tilt barely matters
     // Nearly omnidirectional — lanterns wrap light everywhere
     candelaDistribution: [
       [0, 1.0], [15, 0.99], [30, 0.96], [45, 0.91], [60, 0.84],
@@ -415,6 +420,7 @@ export const FIXTURES = {
     colorTemp: 5600,
     overhead: true,
     defaultMountHeight: 2.0,
+    defaultTiltAngle: 30,     // tilted forward toward subject
     // SnapBag narrows the SkyPanel slightly
     candelaDistribution: [
       [0, 1.0], [5, 0.99], [10, 0.96], [15, 0.91], [20, 0.83],
