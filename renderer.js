@@ -91,16 +91,16 @@ float segIntersect(vec2 ro, vec2 rd, vec2 a, vec2 b) {
   return -1.0;
 }
 
-// Shadow test — analytical soft shadow based on source size
-// For each wall, computes the shadow cone from each endpoint and blends
-// smoothly through the penumbra zone. No sampling = no banding artifacts.
+// Shadow test — hard shadow + analytical penumbra at edges
+// Core shadow from center ray (always correct), then smooth penumbra
+// near wall endpoints based on source size. No sampling = no banding.
 float shadowTest(vec2 origin, vec2 target, int skipW) {
   vec2 dir = target - origin;
   float dist = length(dir);
   if (dist < 0.001) return 1.0;
   vec2 rd = dir / dist;
 
-  float penumbraR = u_sourceSize * 0.15;
+  float srcR = u_sourceSize * 0.15; // source half-width in meters
   float shadow = 1.0;
 
   for (int w = 0; w < 64; w++) {
@@ -110,61 +110,48 @@ float shadowTest(vec2 origin, vec2 target, int skipW) {
     vec2 a = u_walls[w].xy;
     vec2 b = u_walls[w].zw;
 
-    // Quick reject: wall must be between source and target
-    vec2 oa = a - origin;
-    vec2 ob = b - origin;
-    float projA = dot(oa, rd);
-    float projB = dot(ob, rd);
-    if (projA < 0.0 && projB < 0.0) continue;
-    if (projA > dist && projB > dist) continue;
+    // Center ray test
+    float t = segIntersect(origin, rd, a, b);
+    bool centerBlocked = (t > 0.001 && t < dist - 0.001);
 
-    if (penumbraR < 0.005) {
-      // Hard shadow — point source
-      float t = segIntersect(origin, rd, a, b);
-      if (t > 0.001 && t < dist - 0.001) return 0.0;
+    if (srcR < 0.005) {
+      // Hard source — binary shadow
+      if (centerBlocked) return 0.0;
       continue;
     }
 
-    // Analytical soft shadow from each endpoint's shadow boundary
-    // Shadow boundary = line from source center through wall endpoint
-    // Penumbra transitions smoothly across this boundary
-    float wallShadow = 0.0;
+    // Perpendicular distance of each endpoint from the center ray
+    vec2 oa = a - origin;
+    vec2 ob = b - origin;
+    float dA = abs(oa.x * rd.y - oa.y * rd.x);
+    float dB = abs(ob.x * rd.y - ob.y * rd.x);
+    float projA = dot(oa, rd);
+    float projB = dot(ob, rd);
 
-    for (int e = 0; e < 2; e++) {
-      vec2 ep = (e == 0) ? a : b;
-      vec2 otherEp = (e == 0) ? b : a;
+    if (centerBlocked) {
+      // Find nearest endpoint between source and target
+      float nearD = srcR * 2.0; // default: deep umbra
+      if (projA > 0.0 && projA < dist) nearD = min(nearD, dA);
+      if (projB > 0.0 && projB < dist) nearD = min(nearD, dB);
 
-      vec2 boundaryDir = ep - origin;
-      float boundaryLen = length(boundaryDir);
-      if (boundaryLen < 0.001) continue;
-      boundaryDir /= boundaryLen;
+      // Fraction of source visible past this endpoint:
+      // nearD=0 (endpoint on ray): half source peeks around → 0.5
+      // nearD>=srcR (deep umbra): nothing visible → 0.0
+      float visible = smoothstep(srcR, 0.0, nearD) * 0.5;
+      shadow = min(shadow, visible);
+    } else {
+      // Center ray not blocked — check if endpoint is close enough
+      // to partially block the source
+      float nearD = srcR;
+      if (projA > 0.0 && projA < dist && dA < srcR) nearD = min(nearD, dA);
+      if (projB > 0.0 && projB < dist && dB < srcR) nearD = min(nearD, dB);
 
-      // Signed perpendicular distance of the pixel from this shadow boundary
-      vec2 toTarget = target - origin;
-      float signedDist = toTarget.x * boundaryDir.y - toTarget.y * boundaryDir.x;
-
-      // Which side of the boundary is the wall interior?
-      vec2 toOther = otherEp - origin;
-      float otherSide = toOther.x * boundaryDir.y - toOther.y * boundaryDir.x;
-
-      // Penumbra width grows with distance past the wall endpoint
-      float pastEP = max(dot(target - ep, boundaryDir), 0.0);
-      float pw = penumbraR * pastEP / max(boundaryLen, 0.01);
-      pw = clamp(pw, 0.01, penumbraR * 5.0);
-
-      // Shadow factor: 0 = in shadow, 1 = lit
-      // Smooth transition centered on the boundary line
-      float s;
-      if (otherSide > 0.0) {
-        s = smoothstep(-pw, pw, -signedDist);
-      } else {
-        s = smoothstep(-pw, pw, signedDist);
+      if (nearD < srcR) {
+        // Fraction blocked: nearD=0 → 0.5 blocked, nearD=srcR → 0 blocked
+        float blocked = smoothstep(srcR, 0.0, nearD) * 0.5;
+        shadow = min(shadow, 1.0 - blocked);
       }
-
-      wallShadow = max(wallShadow, s);
     }
-
-    shadow = min(shadow, wallShadow);
   }
 
   return shadow;
