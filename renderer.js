@@ -321,6 +321,14 @@ bool isOccluded(vec2 from, vec2 to, int skipW) {
   return false;
 }
 
+// Analytical form factor term for 2D line → point (Lambertian, 1/r² falloff)
+// Evaluates the antiderivative of cos(θ)/r² along the wall at parameter s
+// pu = pixel position along wall axis, pn = perpendicular distance
+float ffTerm(float pu, float pn, float s) {
+  float u = pu - s;
+  return u / (pn * sqrt(u * u + pn * pn));
+}
+
 void main() {
   vec3 existing = texture(u_prevPass, v_uv).rgb;
 
@@ -333,40 +341,44 @@ void main() {
     vec2 a = u_walls[w].xy;
     vec2 b = u_walls[w].zw;
 
-    vec2 wallSegDir = normalize(b - a);
-    vec2 wallNormal = vec2(-wallSegDir.y, wallSegDir.x);
-    float wallLen = length(b - a);
+    vec2 wDir = normalize(b - a);
+    vec2 wNorm = vec2(-wDir.y, wDir.x);
+    float wLen = length(b - a);
 
-    // Which side of the wall is our pixel on
-    float pixelSide = sign(dot(worldPos - a, wallNormal));
+    // Which side of the wall is the pixel on?
+    float side = sign(dot(worldPos - a, wNorm));
+    vec2 faceN = wNorm * side;
+    float perpDist = abs(dot(worldPos - a, wNorm));
+    if (perpDist < 0.05) continue; // too close to wall plane
 
-    int numSamples = 24;
-    for (int s = 0; s < 24; s++) {
-      float t = (float(s) + 0.5) / 24.0;
-      vec2 wallPt = mix(a, b, t);
-      vec2 wallUV = worldToUV(wallPt);
+    // Pixel in wall-aligned coordinates
+    float pu = dot(worldPos - a, wDir);  // along wall
+    float pn = max(perpDist, 0.1);       // perpendicular (clamped to avoid singularity)
 
-      if (wallUV.x < 0.0 || wallUV.x > 1.0 || wallUV.y < 0.0 || wallUV.y > 1.0) continue;
+    // 8 sub-segments: analytical form factor + sampled light
+    const int N = 8;
+    for (int s = 0; s < N; s++) {
+      float s0 = float(s) / float(N) * wLen;
+      float s1 = float(s + 1) / float(N) * wLen;
 
-      vec3 wallLight = texture(u_prevPass, wallUV).rgb;
+      // Analytical form factor for this sub-segment (exact integral of cos/r²)
+      float ff = (ffTerm(pu, pn, s0) - ffTerm(pu, pn, s1)) / 3.14159;
+      if (ff <= 0.0) continue;
 
-      vec2 toUs = worldPos - wallPt;
-      float dist = length(toUs);
-      if (dist < 0.02) continue;
-      vec2 toUsDir = toUs / dist;
+      // Sample light at sub-segment midpoint, offset toward pixel's side
+      // so we read the actual illumination on the correct face
+      float tMid = (float(s) + 0.5) / float(N);
+      vec2 wallPt = mix(a, b, tMid);
+      vec2 samplePt = wallPt + faceN * 0.05;
+      vec2 uv = worldToUV(samplePt);
+      if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) continue;
 
-      vec2 faceNormal = wallNormal * pixelSide;
-      float cosOut = dot(toUsDir, faceNormal);
-      if (cosOut <= 0.0) continue;
+      vec3 wallLight = texture(u_prevPass, uv).rgb;
 
-      // Check if path from wall point to pixel is blocked (skip source wall)
-      if (isOccluded(wallPt + faceNormal * 0.02, worldPos, w)) continue;
+      // Occlusion: is the path from wall to pixel blocked?
+      if (isOccluded(wallPt + faceN * 0.02, worldPos, w)) continue;
 
-      float segLen = wallLen / 24.0;
-      float clampDist = max(dist, 0.15);
-      float atten = cosOut * segLen / (3.14159 * clampDist * clampDist);
-
-      bounce += wallLight * atten * u_reflectance;
+      bounce += wallLight * ff * u_reflectance;
     }
   }
 
