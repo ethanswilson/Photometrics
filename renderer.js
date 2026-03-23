@@ -53,6 +53,8 @@ uniform float u_sourceSize;  // [0,1] affects penumbra
 // Walls: packed as vec4(x1,y1,x2,y2) up to 64 walls
 uniform int u_wallCount;
 uniform vec4 u_walls[64];
+uniform int u_wallTypes[64];  // 0 = diffuse wall, 1 = mirror board
+uniform float u_wallReflectances[64]; // per-wall reflectance
 
 // Grid
 uniform float u_gridScale;   // meters per grid cell
@@ -89,8 +91,8 @@ float segIntersect(vec2 ro, vec2 rd, vec2 a, vec2 b) {
   return -1.0;
 }
 
-// Shadow test — hard shadow with small epsilon to avoid self-occlusion
-float shadowTest(vec2 origin, vec2 target) {
+// Shadow test — hard shadow, optionally skip one wall index
+float shadowTest(vec2 origin, vec2 target, int skipW) {
   vec2 dir = target - origin;
   float dist = length(dir);
   if (dist < 0.001) return 1.0;
@@ -98,12 +100,39 @@ float shadowTest(vec2 origin, vec2 target) {
 
   for (int w = 0; w < 64; w++) {
     if (w >= u_wallCount) break;
+    if (w == skipW) continue;
     float t = segIntersect(origin, rd, u_walls[w].xy, u_walls[w].zw);
-    if (t > 0.01 && t < dist - 0.01) {
+    if (t > 0.001 && t < dist - 0.001) {
       return 0.0;
     }
   }
   return 1.0;
+}
+
+// Reflect point across a line defined by two points
+vec2 reflectPoint(vec2 p, vec2 a, vec2 b) {
+  vec2 ab = normalize(b - a);
+  vec2 ap = p - a;
+  float proj = dot(ap, ab);
+  vec2 closest = a + ab * proj;
+  return 2.0 * closest - p;
+}
+
+// Reflect angle across a wall's normal
+float reflectDir(float dir, vec2 a, vec2 b) {
+  vec2 wallDir = normalize(b - a);
+  vec2 wallNormal = vec2(-wallDir.y, wallDir.x);
+  vec2 lightVec = vec2(cos(dir), sin(dir));
+  vec2 reflected = lightVec - 2.0 * dot(lightVec, wallNormal) * wallNormal;
+  return atan(reflected.y, reflected.x);
+}
+
+// Check if a point can "see" a wall segment (is within the mirror's extent)
+bool canSeeMirror(vec2 p, vec2 a, vec2 b) {
+  vec2 ab = b - a;
+  vec2 ap = p - a;
+  float t = dot(ap, ab) / dot(ab, ab);
+  return t > -0.1 && t < 1.1; // small margin
 }
 
 void main() {
@@ -126,13 +155,64 @@ void main() {
   float falloff = 1.0 / max(dist * dist, 0.01);
 
   // Shadow
-  float shadow = shadowTest(u_lightPos, worldPos);
+  float shadow = shadowTest(u_lightPos, worldPos, -1);
 
-  // Final illuminance (lux) — output linear for bounce pass
+  // Final illuminance (lux)
   float lux = u_peakCandela * u_intensity * photIntensity * falloff * shadow;
 
+  // Mirror reflections — virtual light source for each mirror
+  float mirrorLux = 0.0;
+  for (int m = 0; m < 64; m++) {
+    if (m >= u_wallCount) break;
+    if (u_wallTypes[m] != 1) continue; // skip non-mirrors
+
+    vec2 a = u_walls[m].xy;
+    vec2 b = u_walls[m].zw;
+    vec2 wallDir = normalize(b - a);
+    vec2 wallNormal = vec2(-wallDir.y, wallDir.x);
+
+    // Virtual light = reflection of real light across mirror line
+    vec2 vLight = reflectPoint(u_lightPos, a, b);
+    float vDir = reflectDir(u_lightDir, a, b);
+
+    // Which side of the mirror is the pixel on?
+    float pixelSide = dot(worldPos - a, wallNormal);
+    float lightSide = dot(u_lightPos - a, wallNormal);
+
+    // Mirror only reflects to the opposite side from the light
+    if (pixelSide * lightSide > 0.0) continue;
+
+    // Check that the ray from virtual light to pixel passes through the mirror segment
+    vec2 vToP = worldPos - vLight;
+    float vDist = length(vToP);
+    if (vDist < 0.01) continue;
+    vec2 vRd = vToP / vDist;
+
+    // Ray from virtual light must intersect the mirror
+    float tMirror = segIntersect(vLight, vRd, a, b);
+    if (tMirror < 0.0) continue;
+
+    // The virtual light's beam pattern
+    float vAngle = atan(vToP.y, vToP.x);
+    float vRelAngle = vAngle - vDir;
+    vRelAngle = mod(vRelAngle + 3.14159265, 6.28318530) - 3.14159265;
+
+    float vPhotIntensity = sampleDist(vRelAngle);
+    float vFalloff = 1.0 / max(vDist * vDist, 0.01);
+
+    // Shadow test from virtual light to pixel, skipping the mirror itself
+    float vShadow = shadowTest(vLight, worldPos, m);
+
+    // Also check that the original light can reach the mirror (bounce point)
+    vec2 mirrorPt = vLight + vRd * tMirror;
+    float sToMirror = shadowTest(u_lightPos, mirrorPt, m);
+
+    float refl = u_wallReflectances[m];
+    mirrorLux += u_peakCandela * u_intensity * vPhotIntensity * vFalloff * vShadow * sToMirror * refl;
+  }
+
   // Store linear lux * light color in FBO (tone mapping happens in display pass)
-  fragColor = vec4(u_lightColor * lux, 1.0);
+  fragColor = vec4(u_lightColor * (lux + mirrorLux), 1.0);
 }
 `;
 
@@ -177,14 +257,15 @@ float segIntersectB(vec2 ro, vec2 rd, vec2 a, vec2 b) {
   return -1.0;
 }
 
-// Check if path from A to B is blocked by any wall
-bool isOccluded(vec2 from, vec2 to) {
+// Check if path from A to B is blocked by any wall (skip wall index skipW)
+bool isOccluded(vec2 from, vec2 to, int skipW) {
   vec2 dir = to - from;
   float dist = length(dir);
   if (dist < 0.01) return false;
   vec2 rd = dir / dist;
   for (int w = 0; w < 64; w++) {
     if (w >= u_wallCount) break;
+    if (w == skipW) continue;
     float t = segIntersectB(from, rd, u_walls[w].xy, u_walls[w].zw);
     if (t > 0.0 && t < dist - 0.05) return true;
   }
@@ -221,18 +302,19 @@ void main() {
 
       vec2 toUs = worldPos - wallPt;
       float dist = length(toUs);
-      if (dist < 0.15) continue;
+      if (dist < 0.02) continue;
       vec2 toUsDir = toUs / dist;
 
       vec2 faceNormal = wallNormal * pixelSide;
       float cosOut = dot(toUsDir, faceNormal);
       if (cosOut <= 0.0) continue;
 
-      // Check if path from wall point to pixel is blocked by any wall
-      if (isOccluded(wallPt, worldPos)) continue;
+      // Check if path from wall point to pixel is blocked (skip source wall)
+      if (isOccluded(wallPt + faceNormal * 0.02, worldPos, w)) continue;
 
       float segLen = wallLen / 8.0;
-      float atten = cosOut * segLen / (3.14159 * (dist * dist + 0.1));
+      float clampDist = max(dist, 0.2);
+      float atten = cosOut * segLen / (3.14159 * clampDist * clampDist);
 
       bounce += wallLight * atten * u_reflectance;
     }
@@ -488,7 +570,7 @@ export class Renderer {
     const gl = this.gl;
     const {
       lightPos, lightDir, intensity, peakCandela, lightColor,
-      sourceSize, walls, gridScale, showGrid, showLux,
+      sourceSize, walls, wallTypes, gridScale, showGrid, showLux,
       bounceEnabled, bouncePasses, reflectance
     } = params;
 
@@ -523,10 +605,18 @@ export class Renderer {
     gl.uniform1f(gl.getUniformLocation(dp, 'u_sourceSize'), sourceSize);
 
     gl.uniform1i(gl.getUniformLocation(dp, 'u_wallCount'), walls.length);
+    const wTypes = wallTypes || [];
     for (let i = 0; i < Math.min(walls.length, 64); i++) {
       gl.uniform4f(
         gl.getUniformLocation(dp, `u_walls[${i}]`),
         walls[i][0], walls[i][1], walls[i][2], walls[i][3]
+      );
+      const wt = wTypes[i] || 0;
+      gl.uniform1i(gl.getUniformLocation(dp, `u_wallTypes[${i}]`), wt);
+      // Mirror boards: ~0.9 reflectance; diffuse walls use global reflectance
+      gl.uniform1f(
+        gl.getUniformLocation(dp, `u_wallReflectances[${i}]`),
+        wt === 1 ? 0.9 : reflectance
       );
     }
 
@@ -602,7 +692,8 @@ export class Renderer {
    * Draw walls and light icon as an overlay using 2D canvas
    */
   drawOverlay(ctx, params) {
-    const { lightPos, lightDir, walls, sourceSize } = params;
+    const { lightPos, lightDir, walls, wallTypes, sourceSize } = params;
+    const wTypes = wallTypes || [];
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
 
@@ -614,16 +705,40 @@ export class Renderer {
     };
 
     // Draw walls with grabbable endpoints
-    for (const wall of walls) {
+    for (let i = 0; i < walls.length; i++) {
+      const wall = walls[i];
+      const isMirror = wTypes[i] === 1;
       const [x1, y1] = worldToScreen(wall[0], wall[1]);
       const [x2, y2] = worldToScreen(wall[2], wall[3]);
-      // Wall line
-      ctx.strokeStyle = '#ddd';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
+      // Wall line — mirrors are cyan/reflective, walls are white
+      if (isMirror) {
+        ctx.strokeStyle = '#4ff';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        // Reflective hatching
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 1;
+        const dx = x2 - x1, dy = y2 - y1;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const nx = -dy / len * 8, ny = dx / len * 8;
+        for (let t = 0; t <= 1; t += 0.08) {
+          const px = x1 + dx * t, py = y1 + dy * t;
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(px + nx, py + ny);
+          ctx.stroke();
+        }
+      } else {
+        ctx.strokeStyle = '#ddd';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
       // Endpoints
       ctx.fillStyle = '#fff';
       for (const [px, py] of [[x1, y1], [x2, y2]]) {

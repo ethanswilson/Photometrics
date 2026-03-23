@@ -41,6 +41,7 @@ const state = {
   bouncePasses: 2,
   wallReflectance: 0.7,
   walls: [[-3, 2, -1, 3], [1, 3, 3, 2]],  // two starter walls
+  wallTypes: [0, 0],  // 0 = diffuse wall, 1 = mirror board
   wallEditMode: false,
   wallDrawStart: null,
   draggingWall: null,    // { wallIdx, endIdx } for endpoint dragging
@@ -166,10 +167,14 @@ document.getElementById('show-lux').addEventListener('change', (e) => { state.sh
 document.getElementById('bounce-enabled').addEventListener('change', (e) => { state.bounceEnabled = e.target.checked; });
 document.getElementById('wall-edit-mode').addEventListener('change', (e) => { state.wallEditMode = e.target.checked; });
 
-document.getElementById('clear-walls').addEventListener('click', () => { state.walls = []; });
+document.getElementById('clear-walls').addEventListener('click', () => { state.walls = []; state.wallTypes = []; });
 document.getElementById('add-wall').addEventListener('click', () => {
-  // Add a default wall segment near center
   state.walls.push([-2, 2, 2, 2]);
+  state.wallTypes.push(0);
+});
+document.getElementById('add-mirror').addEventListener('click', () => {
+  state.walls.push([-2, -1, 2, -1]);
+  state.wallTypes.push(1);
 });
 
 // ============================================================
@@ -287,6 +292,7 @@ canvas.parentElement.addEventListener('mouseup', (e) => {
     const dist = Math.sqrt((wx - sx) ** 2 + (wy - sy) ** 2);
     if (dist > 0.1) {
       state.walls.push([sx, sy, wx, wy]);
+      state.wallTypes.push(0);
     }
     state.wallDrawStart = null;
   }
@@ -410,6 +416,7 @@ canvas.parentElement.addEventListener('touchend', (e) => {
     const dist = Math.sqrt((wx - sx) ** 2 + (wy - sy) ** 2);
     if (dist > 0.1) {
       state.walls.push([sx, sy, wx, wy]);
+      state.wallTypes.push(0);
     }
     state.wallDrawStart = null;
   }
@@ -512,6 +519,7 @@ function update() {
     lightColor,
     sourceSize: effectiveSourceSize,
     walls: state.walls,
+    wallTypes: state.wallTypes,
     gridScale: state.gridScale,
     showGrid: state.showGrid,
     showLux: state.showLux,
@@ -526,6 +534,7 @@ function update() {
     lightPos: state.lightPos,
     lightDir: state.lightDir,
     walls: state.walls,
+    wallTypes: state.wallTypes,
     sourceSize: effectiveSourceSize,
   });
 
