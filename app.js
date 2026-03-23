@@ -33,6 +33,7 @@ const state = {
   diffusionType: 'none',
   diffusionAmount: 0,
   sourceSize: 0.12,
+  mountHeight: 0,         // 0 = in-plane, >0 = overhead (meters above floor)
   colorTemp: 5600,
   gridScale: 1.0,
   showGrid: true,
@@ -103,6 +104,7 @@ function bindSlider(id, stateProp, transform, displayFn) {
 bindSlider('intensity', 'intensity', v => v / 100, v => `${v}%`);
 bindSlider('zoom', 'zoom', v => v / 100, v => `${v}%`);
 bindSlider('direction', 'lightDir', v => v * Math.PI / 180, v => `${v}°`);
+bindSlider('mount-height', 'mountHeight', v => v * 0.1, v => `${(v * 0.1).toFixed(1)}m`);
 
 // Beam angle slider drives zoom and also stores override for angles beyond fixture range
 const beamAngleEl = document.getElementById('beam-angle');
@@ -137,6 +139,17 @@ lightTypeSelect.addEventListener('change', () => {
   document.getElementById('source-size-val').textContent = `${Math.round(fixture.sourceSize * 100)}%`;
   document.getElementById('color-temp').value = fixture.colorTemp;
   document.getElementById('cct-val').textContent = `${fixture.colorTemp}K`;
+  // Auto-set mount height for overhead fixtures
+  if (fixture.overhead && fixture.defaultMountHeight) {
+    state.mountHeight = fixture.defaultMountHeight;
+    const sliderVal = Math.round(fixture.defaultMountHeight * 10);
+    document.getElementById('mount-height').value = sliderVal;
+    document.getElementById('mount-height-val').textContent = `${fixture.defaultMountHeight.toFixed(1)}m`;
+  } else {
+    state.mountHeight = 0;
+    document.getElementById('mount-height').value = 0;
+    document.getElementById('mount-height-val').textContent = '0m';
+  }
   // Update beam angle slider range
   if (fixture.zoomRange) {
     beamAngleEl.min = fixture.zoomRange[0];
@@ -526,6 +539,7 @@ function update() {
     bounceEnabled: state.bounceEnabled,
     bouncePasses: state.bouncePasses,
     reflectance: state.wallReflectance,
+    mountHeight: state.mountHeight,
   });
 
   // Overlay
@@ -536,6 +550,7 @@ function update() {
     walls: state.walls,
     wallTypes: state.wallTypes,
     sourceSize: effectiveSourceSize,
+    mountHeight: state.mountHeight,
     gridScale: state.gridScale,
     showGrid: state.showGrid,
   });

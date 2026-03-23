@@ -291,6 +291,141 @@ export const FIXTURES = {
   },
 
   // ---- PRACTICAL / TUNGSTEN ----
+  // ---- OVERHEAD / SPACE LIGHTS ----
+  spacelight_6k: {
+    name: '6K Space Light',
+    manufacturer: 'Mole-Richardson',
+    type: 'spacelight',
+    wattage: 6000,
+    lumens: 120000,
+    beamAngle: 80,
+    fieldAngle: 160,
+    zoomRange: null,
+    sourceSize: 0.90,
+    colorTemp: 3200,
+    overhead: true,
+    defaultMountHeight: 4.0,
+    // Distribution from nadir: very wide, soft wrap-around
+    candelaDistribution: [
+      [0, 1.0], [10, 0.98], [20, 0.94], [30, 0.88], [40, 0.80],
+      [50, 0.70], [60, 0.58], [70, 0.44], [75, 0.35], [80, 0.25],
+      [85, 0.15], [90, 0.08]
+    ],
+    peakCandela: 9600
+  },
+
+  spacelight_2k: {
+    name: '2K Space Light',
+    manufacturer: 'Mole-Richardson',
+    type: 'spacelight',
+    wattage: 2000,
+    lumens: 40000,
+    beamAngle: 80,
+    fieldAngle: 160,
+    zoomRange: null,
+    sourceSize: 0.85,
+    colorTemp: 3200,
+    overhead: true,
+    defaultMountHeight: 3.0,
+    candelaDistribution: [
+      [0, 1.0], [10, 0.98], [20, 0.94], [30, 0.88], [40, 0.80],
+      [50, 0.70], [60, 0.58], [70, 0.44], [75, 0.35], [80, 0.25],
+      [85, 0.15], [90, 0.08]
+    ],
+    peakCandela: 3200
+  },
+
+  // ---- SOFT BOXES / CHIMERAS ----
+  chimera_medium: {
+    name: 'Chimera Medium (w/ 2K)',
+    manufacturer: 'Chimera',
+    type: 'softbox',
+    wattage: 2000,
+    lumens: 35000,
+    beamAngle: 50,
+    fieldAngle: 100,
+    zoomRange: null,
+    sourceSize: 0.75,
+    colorTemp: 3200,
+    overhead: true,
+    defaultMountHeight: 2.5,
+    // Soft box: moderately directed, smooth falloff
+    candelaDistribution: [
+      [0, 1.0], [5, 0.99], [10, 0.96], [15, 0.92], [20, 0.85],
+      [25, 0.76], [30, 0.65], [35, 0.52], [40, 0.39], [45, 0.27],
+      [50, 0.17], [55, 0.10], [60, 0.05], [70, 0.015], [80, 0.004],
+      [90, 0.001]
+    ],
+    peakCandela: 5600
+  },
+
+  chimera_large: {
+    name: 'Chimera Large (w/ 5K)',
+    manufacturer: 'Chimera',
+    type: 'softbox',
+    wattage: 5000,
+    lumens: 88000,
+    beamAngle: 55,
+    fieldAngle: 110,
+    zoomRange: null,
+    sourceSize: 0.85,
+    colorTemp: 3200,
+    overhead: true,
+    defaultMountHeight: 3.0,
+    candelaDistribution: [
+      [0, 1.0], [5, 0.99], [10, 0.97], [15, 0.93], [20, 0.87],
+      [25, 0.78], [30, 0.67], [35, 0.55], [40, 0.42], [45, 0.30],
+      [50, 0.20], [55, 0.12], [60, 0.06], [70, 0.02], [80, 0.005],
+      [90, 0.001]
+    ],
+    peakCandela: 8800
+  },
+
+  chimera_lantern: {
+    name: 'Chimera Lantern',
+    manufacturer: 'Chimera',
+    type: 'lantern',
+    wattage: 1000,
+    lumens: 18000,
+    beamAngle: 180,
+    fieldAngle: 360,
+    zoomRange: null,
+    sourceSize: 0.70,
+    colorTemp: 3200,
+    overhead: true,
+    defaultMountHeight: 2.5,
+    // Nearly omnidirectional — lanterns wrap light everywhere
+    candelaDistribution: [
+      [0, 1.0], [15, 0.99], [30, 0.96], [45, 0.91], [60, 0.84],
+      [75, 0.75], [90, 0.65]
+    ],
+    peakCandela: 1450
+  },
+
+  snapbag_s60: {
+    name: 'DoPchoice SnapBag (S60)',
+    manufacturer: 'DoPchoice',
+    type: 'softbox',
+    wattage: 385,
+    lumens: 18000,
+    beamAngle: 45,
+    fieldAngle: 90,
+    zoomRange: null,
+    sourceSize: 0.80,
+    colorTemp: 5600,
+    overhead: true,
+    defaultMountHeight: 2.0,
+    // SnapBag narrows the SkyPanel slightly
+    candelaDistribution: [
+      [0, 1.0], [5, 0.99], [10, 0.96], [15, 0.91], [20, 0.83],
+      [25, 0.73], [30, 0.61], [35, 0.48], [40, 0.35], [45, 0.23],
+      [50, 0.14], [55, 0.07], [60, 0.03], [70, 0.008], [80, 0.002],
+      [90, 0.0]
+    ],
+    peakCandela: 5700
+  },
+
+  // ---- PRACTICAL / TUNGSTEN ----
   practical_100w: {
     name: 'Practical 100W Bulb',
     manufacturer: 'Generic',

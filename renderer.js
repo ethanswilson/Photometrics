@@ -61,6 +61,9 @@ uniform float u_gridScale;   // meters per grid cell
 uniform bool u_showGrid;
 uniform bool u_showLux;
 
+// Overhead mount height (0 = in-plane, >0 = overhead pointing down)
+uniform float u_mountHeight;
+
 // Converts UV to world position
 vec2 uvToWorld(vec2 uv) {
   vec2 ndc = (uv - 0.5) * u_resolution / u_viewScale;
@@ -174,23 +177,34 @@ bool canSeeMirror(vec2 p, vec2 a, vec2 b) {
 void main() {
   vec2 worldPos = uvToWorld(v_uv);
 
-  // Vector from light to this point
+  // Vector from light to this point (horizontal)
   vec2 toPoint = worldPos - u_lightPos;
-  float dist = length(toPoint);
+  float dist2D = length(toPoint);
 
-  // Angle from light direction to this point
-  float pointAngle = atan(toPoint.y, toPoint.x);
-  float relAngle = pointAngle - u_lightDir;
-  // Normalize to [-PI, PI]
-  relAngle = mod(relAngle + 3.14159265, 6.28318530) - 3.14159265;
+  float photIntensity;
+  float falloff;
 
-  // Photometric intensity at this angle
-  float photIntensity = sampleDist(relAngle);
+  if (u_mountHeight > 0.0) {
+    // Overhead light pointing straight down:
+    // 3D distance from fixture (at height h) to floor point
+    float dist3D = sqrt(dist2D * dist2D + u_mountHeight * u_mountHeight);
+    // Photometric angle = angle from nadir (vertical down)
+    float angleFromNadir = atan(dist2D, u_mountHeight);
+    photIntensity = sampleDist(angleFromNadir);
+    // Inverse square on 3D distance
+    falloff = 1.0 / max(dist3D * dist3D, 0.01);
+    // Lambert's cosine: floor incidence angle
+    falloff *= u_mountHeight / dist3D;
+  } else {
+    // In-plane beam light (existing behavior)
+    float pointAngle = atan(toPoint.y, toPoint.x);
+    float relAngle = pointAngle - u_lightDir;
+    relAngle = mod(relAngle + 3.14159265, 6.28318530) - 3.14159265;
+    photIntensity = sampleDist(relAngle);
+    falloff = 1.0 / max(dist2D * dist2D, 0.01);
+  }
 
-  // Inverse square falloff: E = I / d^2  (illuminance in lux)
-  float falloff = 1.0 / max(dist * dist, 0.01);
-
-  // Shadow
+  // Shadow (2D wall occlusion — walls are vertical barriers)
   float shadow = shadowTest(u_lightPos, worldPos, -1);
 
   // Final illuminance (lux)
@@ -242,12 +256,21 @@ void main() {
     if (mirrorMask < 0.001) continue;
 
     // The virtual light's beam pattern
-    float vAngle = atan(vToP.y, vToP.x);
-    float vRelAngle = vAngle - vDir;
-    vRelAngle = mod(vRelAngle + 3.14159265, 6.28318530) - 3.14159265;
-
-    float vPhotIntensity = sampleDist(vRelAngle);
-    float vFalloff = 1.0 / max(vDist * vDist, 0.01);
+    float vPhotIntensity;
+    float vFalloff;
+    if (u_mountHeight > 0.0) {
+      // Overhead: mirror redirects light, use 3D distance from virtual source
+      float vDist3D = sqrt(vDist * vDist + u_mountHeight * u_mountHeight);
+      float vAngleFromNadir = atan(vDist, u_mountHeight);
+      vPhotIntensity = sampleDist(vAngleFromNadir);
+      vFalloff = u_mountHeight / (vDist3D * vDist3D * vDist3D);
+    } else {
+      float vAngle = atan(vToP.y, vToP.x);
+      float vRelAngle = vAngle - vDir;
+      vRelAngle = mod(vRelAngle + 3.14159265, 6.28318530) - 3.14159265;
+      vPhotIntensity = sampleDist(vRelAngle);
+      vFalloff = 1.0 / max(vDist * vDist, 0.01);
+    }
 
     // Shadow tests: light → mirror, then mirror → pixel (not virtual light → pixel,
     // which traverses the virtual side and can be falsely occluded by real walls)
@@ -657,7 +680,7 @@ export class Renderer {
     const {
       lightPos, lightDir, intensity, peakCandela, lightColor,
       sourceSize, walls, wallTypes, gridScale, showGrid, showLux,
-      bounceEnabled, bouncePasses, reflectance
+      bounceEnabled, bouncePasses, reflectance, mountHeight
     } = params;
 
     const w = this.canvas.width;
@@ -709,6 +732,7 @@ export class Renderer {
     gl.uniform1f(gl.getUniformLocation(dp, 'u_gridScale'), gridScale);
     gl.uniform1i(gl.getUniformLocation(dp, 'u_showGrid'), showGrid ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(dp, 'u_showLux'), showLux ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(dp, 'u_mountHeight'), mountHeight || 0);
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
@@ -809,7 +833,7 @@ export class Renderer {
    * Draw walls and light icon as an overlay using 2D canvas
    */
   drawOverlay(ctx, params) {
-    const { lightPos, lightDir, walls, wallTypes, sourceSize, gridScale, showGrid } = params;
+    const { lightPos, lightDir, walls, wallTypes, sourceSize, mountHeight, gridScale, showGrid } = params;
     const wTypes = wallTypes || [];
     const w = ctx.canvas.width;
     const h = ctx.canvas.height;
@@ -874,36 +898,71 @@ export class Renderer {
     // Draw light fixture icon
     const [lx, ly] = worldToScreen(lightPos[0], lightPos[1]);
     const iconSize = 8 + sourceSize * 20;
+    const isOverhead = mountHeight > 0;
 
     ctx.save();
     ctx.translate(lx, ly);
-    ctx.rotate(lightDir);
 
-    // Body
-    ctx.fillStyle = '#f90';
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, iconSize, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    if (isOverhead) {
+      // Overhead icon: concentric circles (top-down view of downward-facing light)
+      ctx.fillStyle = 'rgba(255, 153, 0, 0.3)';
+      ctx.beginPath();
+      ctx.arc(0, 0, iconSize * 1.6, 0, Math.PI * 2);
+      ctx.fill();
 
-    // Direction indicator
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(iconSize * 0.5, 0);
-    ctx.lineTo(iconSize * 1.5, 0);
-    ctx.stroke();
+      ctx.fillStyle = '#f90';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, iconSize, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
 
-    // Arrow head
-    ctx.beginPath();
-    ctx.moveTo(iconSize * 1.5, 0);
-    ctx.lineTo(iconSize * 1.1, -4);
-    ctx.lineTo(iconSize * 1.1, 4);
-    ctx.closePath();
-    ctx.fillStyle = '#fff';
-    ctx.fill();
+      // Crosshair (pointing down into plane)
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = 1.5;
+      const cr = iconSize * 0.6;
+      ctx.beginPath();
+      ctx.moveTo(-cr, 0); ctx.lineTo(cr, 0);
+      ctx.moveTo(0, -cr); ctx.lineTo(0, cr);
+      ctx.stroke();
+
+      // Height label
+      const dpr = window.devicePixelRatio || 1;
+      ctx.font = `${Math.round(10 * dpr)}px monospace`;
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`${mountHeight.toFixed(1)}m`, 0, iconSize + 4 * dpr);
+    } else {
+      ctx.rotate(lightDir);
+
+      // Body
+      ctx.fillStyle = '#f90';
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, iconSize, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Direction indicator
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(iconSize * 0.5, 0);
+      ctx.lineTo(iconSize * 1.5, 0);
+      ctx.stroke();
+
+      // Arrow head
+      ctx.beginPath();
+      ctx.moveTo(iconSize * 1.5, 0);
+      ctx.lineTo(iconSize * 1.1, -4);
+      ctx.lineTo(iconSize * 1.1, 4);
+      ctx.closePath();
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+    }
 
     ctx.restore();
 
