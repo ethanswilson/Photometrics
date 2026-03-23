@@ -91,22 +91,48 @@ float segIntersect(vec2 ro, vec2 rd, vec2 a, vec2 b) {
   return -1.0;
 }
 
-// Shadow test — hard shadow, optionally skip one wall index
+// Shadow test with source-size-based soft penumbra (tent-weighted samples)
 float shadowTest(vec2 origin, vec2 target, int skipW) {
   vec2 dir = target - origin;
   float dist = length(dir);
   if (dist < 0.001) return 1.0;
   vec2 rd = dir / dist;
+  vec2 perp = vec2(-rd.y, rd.x);
 
-  for (int w = 0; w < 64; w++) {
-    if (w >= u_wallCount) break;
-    if (w == skipW) continue;
-    float t = segIntersect(origin, rd, u_walls[w].xy, u_walls[w].zw);
-    if (t > 0.001 && t < dist - 0.001) {
-      return 0.0;
+  // Penumbra radius scales with source size (world-space half-width)
+  float penumbraR = u_sourceSize * 0.3;
+  int samples = (penumbraR > 0.015) ? 9 : 1;
+
+  float lit = 0.0;
+  float totalWeight = 0.0;
+
+  for (int s = 0; s < 9; s++) {
+    if (s >= samples) break;
+    float t01 = float(s) / float(max(samples - 1, 1));
+    float offset = (t01 - 0.5) * 2.0 * penumbraR;
+    // Tent filter: peak at center, zero at edges — smooth penumbra
+    float weight = 1.0 - abs(t01 - 0.5) * 2.0;
+    weight = max(weight, 0.1); // minimum weight at edges
+
+    vec2 sOrigin = origin + perp * offset;
+    vec2 sDir = target - sOrigin;
+    float sDist = length(sDir);
+    vec2 sRd = sDir / sDist;
+
+    bool blocked = false;
+    for (int w = 0; w < 64; w++) {
+      if (w >= u_wallCount) break;
+      if (w == skipW) continue;
+      float t = segIntersect(sOrigin, sRd, u_walls[w].xy, u_walls[w].zw);
+      if (t > 0.001 && t < sDist - 0.001) {
+        blocked = true;
+        break;
+      }
     }
+    if (!blocked) lit += weight;
+    totalWeight += weight;
   }
-  return 1.0;
+  return lit / totalWeight;
 }
 
 // Reflect point across a line defined by two points
@@ -179,8 +205,8 @@ void main() {
     float pixelSide = dot(worldPos - a, wallNormal);
     float lightSide = dot(u_lightPos - a, wallNormal);
 
-    // Mirror only reflects to the opposite side from the light
-    if (pixelSide * lightSide > 0.0) continue;
+    // Mirror only reflects to the same side as the light
+    if (pixelSide * lightSide < 0.0) continue;
 
     // Check that the ray from virtual light to pixel passes through the mirror segment
     vec2 vToP = worldPos - vLight;
