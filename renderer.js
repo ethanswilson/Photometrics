@@ -91,9 +91,9 @@ float segIntersect(vec2 ro, vec2 rd, vec2 a, vec2 b) {
   return -1.0;
 }
 
-// Shadow test — hard shadow + analytical penumbra at edges
-// Core shadow from center ray (always correct), then smooth penumbra
-// near wall endpoints based on source size. No sampling = no banding.
+// Shadow test — hard shadow + one-sided analytical penumbra
+// Center ray determines core shadow (always correct/opaque).
+// Penumbra only softens the LIT side of shadow edges (no light leaks).
 float shadowTest(vec2 origin, vec2 target, int skipW) {
   vec2 dir = target - origin;
   float dist = length(dir);
@@ -110,17 +110,20 @@ float shadowTest(vec2 origin, vec2 target, int skipW) {
     vec2 a = u_walls[w].xy;
     vec2 b = u_walls[w].zw;
 
-    // Center ray test
+    // Center ray test — this is ALWAYS authoritative for blocking
     float t = segIntersect(origin, rd, a, b);
     bool centerBlocked = (t > 0.001 && t < dist - 0.001);
 
-    if (srcR < 0.005) {
-      // Hard source — binary shadow
-      if (centerBlocked) return 0.0;
+    if (centerBlocked) {
+      // Wall fully blocks center ray → shadow = 0, no penumbra leak
+      shadow = 0.0;
       continue;
     }
 
-    // Perpendicular distance of each endpoint from the center ray
+    if (srcR < 0.005) continue; // hard source, center not blocked = fully lit
+
+    // Center ray NOT blocked — check if a wall endpoint is close enough
+    // to partially block the extended source (penumbra on lit side only)
     vec2 oa = a - origin;
     vec2 ob = b - origin;
     float dA = abs(oa.x * rd.y - oa.y * rd.x);
@@ -128,29 +131,14 @@ float shadowTest(vec2 origin, vec2 target, int skipW) {
     float projA = dot(oa, rd);
     float projB = dot(ob, rd);
 
-    if (centerBlocked) {
-      // Find nearest endpoint between source and target
-      float nearD = srcR * 2.0; // default: deep umbra
-      if (projA > 0.0 && projA < dist) nearD = min(nearD, dA);
-      if (projB > 0.0 && projB < dist) nearD = min(nearD, dB);
+    float nearD = srcR;
+    if (projA > 0.0 && projA < dist && dA < srcR) nearD = min(nearD, dA);
+    if (projB > 0.0 && projB < dist && dB < srcR) nearD = min(nearD, dB);
 
-      // Fraction of source visible past this endpoint:
-      // nearD=0 (endpoint on ray): half source peeks around → 0.5
-      // nearD>=srcR (deep umbra): nothing visible → 0.0
-      float visible = smoothstep(srcR, 0.0, nearD) * 0.5;
-      shadow = min(shadow, visible);
-    } else {
-      // Center ray not blocked — check if endpoint is close enough
-      // to partially block the source
-      float nearD = srcR;
-      if (projA > 0.0 && projA < dist && dA < srcR) nearD = min(nearD, dA);
-      if (projB > 0.0 && projB < dist && dB < srcR) nearD = min(nearD, dB);
-
-      if (nearD < srcR) {
-        // Fraction blocked: nearD=0 → 0.5 blocked, nearD=srcR → 0 blocked
-        float blocked = smoothstep(srcR, 0.0, nearD) * 0.5;
-        shadow = min(shadow, 1.0 - blocked);
-      }
+    if (nearD < srcR) {
+      // Partial shadow: nearD=0 → half source blocked (0.5), nearD=srcR → fully lit (1.0)
+      float lit = 0.5 + 0.5 * smoothstep(0.0, srcR, nearD);
+      shadow = min(shadow, lit);
     }
   }
 
@@ -236,9 +224,22 @@ void main() {
     if (vDist < 0.01) continue;
     vec2 vRd = vToP / vDist;
 
-    // Ray from virtual light must intersect the mirror
-    float tMirror = segIntersect(vLight, vRd, a, b);
+    // How close does the ray pass to the mirror segment?
+    // Use parameter along mirror to soft-clip at mirror edges
+    vec2 ab = b - a;
+    float mirrorLen = length(ab);
+    vec2 vToA = a - vLight;
+    float denom = vRd.x * ab.y - vRd.y * ab.x;
+    if (abs(denom) < 1e-8) continue;
+    float sMirror = (vToA.y * vRd.x - vToA.x * vRd.y) / denom;
+    float tMirror = (vToA.y * ab.x - vToA.x * ab.y) / denom;
     if (tMirror < 0.0) continue;
+
+    // Soft edge falloff at mirror boundaries (instead of hard clip)
+    float edgeSoftness = u_sourceSize * 0.1 / max(mirrorLen, 0.01);
+    float mirrorMask = smoothstep(-edgeSoftness, edgeSoftness, sMirror)
+                     * smoothstep(-edgeSoftness, edgeSoftness, 1.0 - sMirror);
+    if (mirrorMask < 0.001) continue;
 
     // The virtual light's beam pattern
     float vAngle = atan(vToP.y, vToP.x);
@@ -256,7 +257,7 @@ void main() {
     float sToMirror = shadowTest(u_lightPos, mirrorPt, m);
 
     float refl = u_wallReflectances[m];
-    mirrorLux += u_peakCandela * u_intensity * vPhotIntensity * vFalloff * vShadow * sToMirror * refl;
+    mirrorLux += u_peakCandela * u_intensity * vPhotIntensity * vFalloff * vShadow * sToMirror * refl * mirrorMask;
   }
 
   // Store linear lux * light color in FBO (tone mapping happens in display pass)
