@@ -207,8 +207,11 @@ void main() {
     photIntensity = sampleDist(photAngle);
     // Inverse square on 3D distance
     falloff = 1.0 / max(dist3D * dist3D, 0.01);
-    // Lambert's cosine: floor incidence angle (h / dist3D)
-    falloff *= h / dist3D;
+    // Lambert's cosine for floor incidence, blended out as tilt
+    // approaches horizontal (at 90° tilt the light is in-plane,
+    // so no floor-incidence correction applies)
+    float cosIncidence = h / dist3D;
+    falloff *= mix(cosIncidence, 1.0, sinTilt);
   } else {
     // In-plane beam light (existing behavior)
     float pointAngle = atan(toPoint.y, toPoint.x);
@@ -282,7 +285,8 @@ void main() {
       float vDotAV = vSinTilt * dot(vAimDir2D, vToP) + vCosTilt * vh;
       float vCosPhot = clamp(vDotAV / vDist3D, -1.0, 1.0);
       vPhotIntensity = sampleDist(acos(vCosPhot));
-      vFalloff = vh / (vDist3D * vDist3D * vDist3D);
+      float vCosInc = vh / vDist3D;
+      vFalloff = mix(vCosInc, 1.0, vSinTilt) / max(vDist3D * vDist3D, 0.01);
     } else {
       float vAngle = atan(vToP.y, vToP.x);
       float vRelAngle = vAngle - vDir;
