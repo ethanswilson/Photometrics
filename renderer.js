@@ -249,12 +249,11 @@ void main() {
     float vPhotIntensity = sampleDist(vRelAngle);
     float vFalloff = 1.0 / max(vDist * vDist, 0.01);
 
-    // Shadow test from virtual light to pixel, skipping the mirror itself
-    float vShadow = shadowTest(vLight, worldPos, m);
-
-    // Also check that the original light can reach the mirror (bounce point)
+    // Shadow tests: light → mirror, then mirror → pixel (not virtual light → pixel,
+    // which traverses the virtual side and can be falsely occluded by real walls)
     vec2 mirrorPt = vLight + vRd * tMirror;
     float sToMirror = shadowTest(u_lightPos, mirrorPt, m);
+    float vShadow = shadowTest(mirrorPt, worldPos, m);
 
     float refl = u_wallReflectances[m];
     mirrorLux += u_peakCandela * u_intensity * vPhotIntensity * vFalloff * vShadow * sToMirror * refl * mirrorMask;
@@ -716,6 +715,12 @@ export class Renderer {
     // ---- Pass 2+: Bounce passes at HALF resolution ----
     // Jacobi iteration: bounce_n = ρ·gather(direct + bounce_{n-1})
     // Output is bounce-only; display composites direct + bounce.
+    // Always clear bounce FBO so stale data doesn't persist after walls are removed
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboBounceA.fbo);
+    gl.viewport(0, 0, this.fboBounceA.width, this.fboBounceA.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.viewport(0, 0, w, h);
+
     let bounceTex = this.fboBounceA.tex; // default: zero bounce
     if (bounceEnabled && walls.length > 0) {
       const bp = this.programs.bounce;
