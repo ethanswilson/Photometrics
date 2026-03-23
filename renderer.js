@@ -229,7 +229,7 @@ void main() {
     vec2 ab = b - a;
     float mirrorLen = length(ab);
     vec2 vToA = a - vLight;
-    float denom = vRd.x * ab.y - vRd.y * ab.x;
+    float denom = vRd.y * ab.x - vRd.x * ab.y;
     if (abs(denom) < 1e-8) continue;
     float sMirror = (vToA.y * vRd.x - vToA.x * vRd.y) / denom;
     float tMirror = (vToA.y * ab.x - vToA.x * ab.y) / denom;
