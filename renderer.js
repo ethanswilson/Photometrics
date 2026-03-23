@@ -340,8 +340,9 @@ void main() {
     // Which side of the wall is our pixel on
     float pixelSide = sign(dot(worldPos - a, wallNormal));
 
-    for (int s = 0; s < 8; s++) {
-      float t = (float(s) + 0.5) / 8.0;
+    int numSamples = 24;
+    for (int s = 0; s < 24; s++) {
+      float t = (float(s) + 0.5) / 24.0;
       vec2 wallPt = mix(a, b, t);
       vec2 wallUV = worldToUV(wallPt);
 
@@ -361,8 +362,8 @@ void main() {
       // Check if path from wall point to pixel is blocked (skip source wall)
       if (isOccluded(wallPt + faceNormal * 0.02, worldPos, w)) continue;
 
-      float segLen = wallLen / 8.0;
-      float clampDist = max(dist, 0.2);
+      float segLen = wallLen / 24.0;
+      float clampDist = max(dist, 0.15);
       float atten = cosOut * segLen / (3.14159 * clampDist * clampDist);
 
       bounce += wallLight * atten * u_reflectance;
