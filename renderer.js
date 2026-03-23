@@ -261,7 +261,8 @@ void main() {
   }
 
   // Store linear lux * light color in FBO (tone mapping happens in display pass)
-  fragColor = vec4(u_lightColor * (lux + mirrorLux), 1.0);
+  // Clamp to safe half-float range to prevent Inf/NaN in RGBA16F
+  fragColor = vec4(min(u_lightColor * (lux + mirrorLux), vec3(60000.0)), 1.0);
 }
 `;
 
@@ -281,6 +282,7 @@ uniform float u_reflectance;
 // Walls
 uniform int u_wallCount;
 uniform vec4 u_walls[64];
+uniform int u_wallTypes[64]; // 0 = diffuse wall, 1 = mirror
 
 vec2 uvToWorld(vec2 uv) {
   vec2 ndc = (uv - 0.5) * u_resolution / u_viewScale;
@@ -338,6 +340,9 @@ void main() {
   for (int w = 0; w < 64; w++) {
     if (w >= u_wallCount) break;
 
+    // Mirrors reflect specularly (handled in direct pass), not diffusely
+    if (u_wallTypes[w] == 1) continue;
+
     vec2 a = u_walls[w].xy;
     vec2 b = u_walls[w].zw;
 
@@ -382,7 +387,7 @@ void main() {
     }
   }
 
-  fragColor = vec4(existing + bounce, 1.0);
+  fragColor = vec4(min(existing + bounce, vec3(60000.0)), 1.0);
 }
 `;
 
@@ -408,7 +413,9 @@ vec2 uvToWorld(vec2 uv) {
 }
 
 void main() {
-  vec3 linear = texture(u_lightTex, v_uv).rgb;
+  vec3 linear = max(texture(u_lightTex, v_uv).rgb, vec3(0.0));
+  // Guard against Inf/NaN from half-float overflow
+  linear = min(linear, vec3(60000.0));
 
   // Tone map from linear lux to display
   float lum = dot(linear, vec3(0.2126, 0.7152, 0.0722));
@@ -703,6 +710,10 @@ export class Renderer {
         gl.uniform4f(
           gl.getUniformLocation(bp, `u_walls[${i}]`),
           walls[i][0], walls[i][1], walls[i][2], walls[i][3]
+        );
+        gl.uniform1i(
+          gl.getUniformLocation(bp, `u_wallTypes[${i}]`),
+          (wTypes[i] || 0)
         );
       }
 
